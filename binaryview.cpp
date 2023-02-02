@@ -4500,6 +4500,114 @@ void BinaryView::RemoveExpressionParserMagicValues(const vector<string>& names)
 }
 
 
+Ref<ExternalLibrary> BinaryView::AddExternalLibrary(const std::string& name, Ref<ProjectFile> backingFile)
+{
+	BNExternalLibrary* lib = BNBinaryViewAddExternalLibrary(m_object, name.c_str(), backingFile ? backingFile->m_object : nullptr);
+	if (!lib)
+		return nullptr;
+	return new ExternalLibrary(BNNewExternalLibraryReference(lib));
+}
+
+
+void BinaryView::SetExternalLibraryName(Ref<ExternalLibrary> library, const std::string& newName)
+{
+	BNBinaryViewSetExternalLibraryName(m_object, library->m_object, newName.c_str());
+}
+
+
+void BinaryView::RemoveExternalLibrary(const std::string& name)
+{
+	BNBinaryViewRemoveExternalLibrary(m_object, name.c_str());
+}
+
+
+Ref<ExternalLibrary> BinaryView::GetExternalLibraryById(const std::string& id)
+{
+	BNExternalLibrary* lib = BNBinaryViewGetExternalLibraryById(m_object, id.c_str());
+	if (!lib)
+		return nullptr;
+	return new ExternalLibrary(BNNewExternalLibraryReference(lib));
+}
+
+
+Ref<ExternalLibrary> BinaryView::GetExternalLibraryByName(const std::string& name)
+{
+	BNExternalLibrary* lib = BNBinaryViewGetExternalLibraryByName(m_object, name.c_str());
+	if (!lib)
+		return nullptr;
+	return new ExternalLibrary(BNNewExternalLibraryReference(lib));
+}
+
+
+std::vector<Ref<ExternalLibrary>> BinaryView::GetExternalLibraries()
+{
+	size_t count;
+	BNExternalLibrary** libs = BNBinaryViewGetExternalLibraries(m_object, &count);
+
+	vector<Ref<ExternalLibrary>> result;
+	result.reserve(count);
+	for (size_t i = 0; i < count; i++)
+		result.push_back(new ExternalLibrary(BNNewExternalLibraryReference(libs[i])));
+
+	BNFreeExternalLibraryList(libs, count);
+	return result;
+}
+
+
+Ref<ExternalLocation> BinaryView::AddExternalLocation(const std::string& internalSymbol, Ref<ExternalLibrary> library, std::optional<std::string> externalSymbol, std::optional<uint64_t> externalAddress)
+{
+	BNExternalLocation* loc = BNBinaryViewAddExternalLocation(m_object,
+		internalSymbol.c_str(),
+		library ? library->m_object : nullptr,
+		externalSymbol.has_value() ? externalSymbol.value().c_str() : nullptr,
+		externalAddress.has_value() ? &externalAddress.value() : nullptr
+	);
+
+	if (!loc)
+		return nullptr;
+	return new ExternalLocation(BNNewExternalLocationReference(loc));
+}
+
+
+void BinaryView::RemoveExternalLocation(const std::string& internalSymbol)
+{
+	BNBinaryViewRemoveExternalLocation(m_object, internalSymbol.c_str());
+}
+
+
+Ref<ExternalLocation> BinaryView::GetExternalLocationById(const std::string& id)
+{
+	BNExternalLocation* loc = BNBinaryViewGetExternalLocationById(m_object, id.c_str());
+	if (!loc)
+		return nullptr;
+	return new ExternalLocation(BNNewExternalLocationReference(loc));
+}
+
+
+Ref<ExternalLocation> BinaryView::GetExternalLocationByInternalSymbol(const std::string& internalSymbol)
+{
+	BNExternalLocation* loc = BNBinaryViewGetExternalLocationByInternalSymbol(m_object, internalSymbol.c_str());
+	if (!loc)
+		return nullptr;
+	return new ExternalLocation(BNNewExternalLocationReference(loc));
+}
+
+
+std::vector<Ref<ExternalLocation>> BinaryView::GetExternalLocations()
+{
+	size_t count;
+	BNExternalLocation** locs = BNBinaryViewGetExternalLocations(m_object, &count);
+
+	vector<Ref<ExternalLocation>> result;
+	result.reserve(count);
+	for (size_t i = 0; i < count; i++)
+		result.push_back(new ExternalLocation(BNNewExternalLocationReference(locs[i])));
+
+	BNFreeExternalLocationList(locs, count);
+	return result;
+}
+
+
 Relocation::Relocation(BNRelocation* reloc)
 {
 	m_object = reloc;
