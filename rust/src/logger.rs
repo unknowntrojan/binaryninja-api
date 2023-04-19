@@ -60,7 +60,14 @@ impl log::Log for Logger {
 
         if let Ok(msg) = CString::new(format!("{}", record.args())) {
             unsafe {
-                BNLog(0, level, std::ptr::null(), 0, msg.as_ptr());
+                BNLog(
+                    0,
+                    level,
+                    std::ptr::null(),
+                    0,
+                    "%s".chars().as_ptr(),
+                    msg.as_ptr(),
+                );
             }
         };
     }
