@@ -1479,6 +1479,12 @@ extern "C"
 		void (*componentFunctionRemoved)(void*ctxt, BNBinaryView* view, BNComponent* component, BNFunction* function);
 		void (*componentDataVariableAdded)(void*ctxt, BNBinaryView* view, BNComponent* component, BNDataVariable* var);
 		void (*componentDataVariableRemoved)(void*ctxt, BNBinaryView* view, BNComponent* component, BNDataVariable* var);
+		void (*externalLibraryAdded)(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		void (*externalLibraryUpdated)(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		void (*externalLibraryRemoved)(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		void (*externalLocationAdded)(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
+		void (*externalLocationUpdated)(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
+		void (*externalLocationRemoved)(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
 	} BNBinaryDataNotification;
 
 	typedef struct BNFileAccessor

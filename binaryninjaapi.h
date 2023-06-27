@@ -2690,6 +2690,12 @@ namespace BinaryNinja {
 		static void ComponentFunctionRemovedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNFunction* function);
 		static void ComponentDataVariableAddedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNDataVariable* var);
 		static void ComponentDataVariableRemovedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNDataVariable* var);
+		static void ExternalLibraryAddedCallback(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		static void ExternalLibraryUpdatedCallback(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		static void ExternalLibraryRemovedCallback(void* ctxt, BNBinaryView* data, BNExternalLibrary* library);
+		static void ExternalLocationAddedCallback(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
+		static void ExternalLocationUpdatedCallback(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
+		static void ExternalLocationRemovedCallback(void* ctxt, BNBinaryView* data, BNExternalLocation* location);
 
 	  public:
 		BinaryDataNotification();
@@ -2968,6 +2974,42 @@ namespace BinaryNinja {
 			(void)data;
 			(void)component;
 			(void)var;
+		}
+
+		virtual void OnExternalLibraryAdded(BinaryView* data, ExternalLibrary* library)
+		{
+			(void)data;
+			(void)library;
+		}
+
+		virtual void OnExternalLibraryUpdated(BinaryView* data, ExternalLibrary* library)
+		{
+			(void)data;
+			(void)library;
+		}
+
+		virtual void OnExternalLibraryRemoved(BinaryView* data, ExternalLibrary* library)
+		{
+			(void)data;
+			(void)library;
+		}
+
+		virtual void OnExternalLocationAdded(BinaryView* data, ExternalLocation* location)
+		{
+			(void)data;
+			(void)location;
+		}
+
+		virtual void OnExternalLocationUpdated(BinaryView* data, ExternalLocation* location)
+		{
+			(void)data;
+			(void)location;
+		}
+
+		virtual void OnExternalLocationRemoved(BinaryView* data, ExternalLocation* location)
+		{
+			(void)data;
+			(void)location;
 		}
 	};
 
