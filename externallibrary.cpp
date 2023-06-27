@@ -31,15 +31,6 @@ ExternalLibrary::ExternalLibrary(BNExternalLibrary* lib)
 }
 
 
-std::string ExternalLibrary::GetId() const
-{
-	char* id = BNExternalLibraryGetId(m_object);
-	std::string result = id;
-	BNFreeString(id);
-	return result;
-}
-
-
 std::string ExternalLibrary::GetName() const
 {
 	char* name = BNExternalLibraryGetName(m_object);
@@ -49,32 +40,26 @@ std::string ExternalLibrary::GetName() const
 }
 
 
-Ref<ProjectFile> ExternalLibrary::GetBackingFile() const
+std::optional<std::string> ExternalLibrary::GetBackingFileId() const
 {
-	BNProjectFile* file = BNExternalLibraryGetBackingFile(m_object);
-	if (!file)
-		return nullptr;
-	return new ProjectFile(BNNewProjectFileReference(file));
+	char* fileId = BNExternalLibraryGetBackingFileId(m_object);
+	if (!fileId)
+		return {};
+	std::string result = fileId;
+	BNFreeString(fileId);
+	return result;
 }
 
 
-void ExternalLibrary::SetBackingFile(Ref<ProjectFile> backingFile)
+void ExternalLibrary::SetBackingFileId(const std::optional<std::string>& fileId)
 {
-	BNExternalLibrarySetBackingFile(m_object, backingFile ? backingFile->m_object : nullptr);
+	BNExternalLibrarySetBackingFileId(m_object, fileId.has_value() ? fileId.value().c_str() : nullptr);
 }
 
 
 ExternalLocation::ExternalLocation(BNExternalLocation* loc)
 {
 	m_object = loc;
-}
-
-std::string ExternalLocation::GetId()
-{
-	char* name = BNExternalLocationGetId(m_object);
-	std::string result = name;
-	BNFreeString(name);
-	return result;
 }
 
 

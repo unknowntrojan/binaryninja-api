@@ -2212,7 +2212,6 @@ namespace BinaryNinja {
 	public:
 		ExternalLocation(BNExternalLocation* loc);
 
-		std::string GetId();
 		std::string GetInternalSymbol();
 		std::optional<uint64_t> GetAddress();
 		std::optional<std::string> GetSymbol();
@@ -2236,11 +2235,10 @@ namespace BinaryNinja {
 	public:
 		ExternalLibrary(BNExternalLibrary* lib);
 
-		std::string GetId() const;
 		std::string GetName() const;
-		Ref<ProjectFile> GetBackingFile() const;
+		std::optional<std::string> GetBackingFileId() const;
 
-		void SetBackingFile(Ref<ProjectFile> backingFile);
+		void SetBackingFileId(const std::optional<std::string>& backingFileId);
 	};
 
 	/*!
@@ -5789,17 +5787,14 @@ namespace BinaryNinja {
 		*/
 		bool GetExpressionParserMagicValue(const std::string& name, uint64_t* value);
 
-		Ref<ExternalLibrary> AddExternalLibrary(const std::string& name, Ref<ProjectFile> backingFile);
-		void SetExternalLibraryName(Ref<ExternalLibrary> library, const std::string& newName);
+		Ref<ExternalLibrary> AddExternalLibrary(const std::string& name, const std::optional<std::string>& backingFileId, bool isAuto = false);
 		void RemoveExternalLibrary(const std::string& name);
-		Ref<ExternalLibrary> GetExternalLibraryById(const std::string& id);
-		Ref<ExternalLibrary> GetExternalLibraryByName(const std::string& name);
+		Ref<ExternalLibrary> GetExternalLibrary(const std::string& name);
 		std::vector<Ref<ExternalLibrary>> GetExternalLibraries();
 
-		Ref<ExternalLocation> AddExternalLocation(const std::string& internalSymbol, Ref<ExternalLibrary> library, std::optional<std::string> externalSymbol, std::optional<uint64_t> externalAddress);
+		Ref<ExternalLocation> AddExternalLocation(const std::string& internalSymbol, Ref<ExternalLibrary> library, std::optional<std::string> externalSymbol, std::optional<uint64_t> externalAddress, bool isAuto = false);
 		void RemoveExternalLocation(const std::string& internalSymbol);
-		Ref<ExternalLocation> GetExternalLocationById(const std::string& id);
-		Ref<ExternalLocation> GetExternalLocationByInternalSymbol(const std::string& internalSymbol);
+		Ref<ExternalLocation> GetExternalLocation(const std::string& internalSymbol);
 		std::vector<Ref<ExternalLocation>> GetExternalLocations();
 	};
 

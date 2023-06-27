@@ -3275,16 +3275,14 @@ extern "C"
 	BINARYNINJACOREAPI BNExternalLibrary* BNNewExternalLibraryReference(BNExternalLibrary* lib);
 	BINARYNINJACOREAPI void BNFreeExternalLibrary(BNExternalLibrary* lib);
 	BINARYNINJACOREAPI void BNFreeExternalLibraryList(BNExternalLibrary** libs, size_t count);
-	BINARYNINJACOREAPI char* BNExternalLibraryGetId(BNExternalLibrary* lib);
 	BINARYNINJACOREAPI char* BNExternalLibraryGetName(BNExternalLibrary* lib);
-	BINARYNINJACOREAPI void BNExternalLibrarySetBackingFile(BNExternalLibrary* lib, BNProjectFile* file);
-	BINARYNINJACOREAPI BNProjectFile* BNExternalLibraryGetBackingFile(BNExternalLibrary* lib);
+	BINARYNINJACOREAPI void BNExternalLibrarySetBackingFileId(BNExternalLibrary* lib, const char* fileId);
+	BINARYNINJACOREAPI char* BNExternalLibraryGetBackingFileId(BNExternalLibrary* lib);
 
 	// ExternalLocation object
 	BINARYNINJACOREAPI BNExternalLocation* BNNewExternalLocationReference(BNExternalLocation*loc);
 	BINARYNINJACOREAPI void BNFreeExternalLocation(BNExternalLocation*loc);
 	BINARYNINJACOREAPI void BNFreeExternalLocationList(BNExternalLocation**locs, size_t count);
-	BINARYNINJACOREAPI char* BNExternalLocationGetId(BNExternalLocation* loc);
 	BINARYNINJACOREAPI char* BNExternalLocationGetInternalSymbol(BNExternalLocation* loc);
 	BINARYNINJACOREAPI uint64_t BNExternalLocationGetAddress(BNExternalLocation* loc);
 	BINARYNINJACOREAPI char* BNExternalLocationGetSymbol(BNExternalLocation* loc);
@@ -5691,16 +5689,14 @@ extern "C"
 	BINARYNINJACOREAPI BNBinaryView* BNLoadBinaryView(BNBinaryView* view, const bool updateAnalysis,
 		bool (*progress)(size_t, size_t), const BNMetadata* const options, const bool isDatabase);
 
-	BINARYNINJACOREAPI BNExternalLibrary* BNBinaryViewAddExternalLibrary(BNBinaryView* view, const char* name, BNProjectFile* backingFile);
+	BINARYNINJACOREAPI BNExternalLibrary* BNBinaryViewAddExternalLibrary(BNBinaryView* view, const char* name, const char* backingFileId, bool isAuto);
 	BINARYNINJACOREAPI void BNBinaryViewSetExternalLibraryName(BNBinaryView* view, BNExternalLibrary* library, const char* newName);
 	BINARYNINJACOREAPI void BNBinaryViewRemoveExternalLibrary(BNBinaryView* view, const char* name);
-	BINARYNINJACOREAPI BNExternalLibrary* BNBinaryViewGetExternalLibraryById(BNBinaryView* view, const char* id);
-	BINARYNINJACOREAPI BNExternalLibrary* BNBinaryViewGetExternalLibraryByName(BNBinaryView* view, const char* name);
+	BINARYNINJACOREAPI BNExternalLibrary* BNBinaryViewGetExternalLibrary(BNBinaryView* view, const char* name);
 	BINARYNINJACOREAPI BNExternalLibrary** BNBinaryViewGetExternalLibraries(BNBinaryView* view, size_t* count);
-	BINARYNINJACOREAPI BNExternalLocation* BNBinaryViewAddExternalLocation(BNBinaryView* view, const char* internalSymbol, BNExternalLibrary* library, const char* externalSymbol, uint64_t* externalAddress);
+	BINARYNINJACOREAPI BNExternalLocation* BNBinaryViewAddExternalLocation(BNBinaryView* view, const char* internalSymbol, BNExternalLibrary* library, const char* externalSymbol, uint64_t* externalAddress, bool isAuto);
 	BINARYNINJACOREAPI void BNBinaryViewRemoveExternalLocation(BNBinaryView* view, const char* internalSymbol);
-	BINARYNINJACOREAPI BNExternalLocation* BNBinaryViewGetExternalLocationById(BNBinaryView* view, const char* id);
-	BINARYNINJACOREAPI BNExternalLocation* BNBinaryViewGetExternalLocationByInternalSymbol(BNBinaryView* view, const char* internalSymbol);
+	BINARYNINJACOREAPI BNExternalLocation* BNBinaryViewGetExternalLocation(BNBinaryView* view, const char* internalSymbol);
 	BINARYNINJACOREAPI BNExternalLocation** BNBinaryViewGetExternalLocations(BNBinaryView* view, size_t* count);
 
 	// Source code processing
