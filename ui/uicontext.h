@@ -411,6 +411,7 @@ class BINARYNINJAUIAPI UIContext
 
 	virtual bool openFilename(const QString& path, bool openOptions = false);
 	virtual ViewFrame* openFileContext(FileContext* file, const QString& forcedView = "", bool addTab = true);
+	virtual bool openProjectFile(ProjectFileRef file, ExternalLocationRef loc = nullptr);
 	virtual void recreateViewFrames(FileContext* file) = 0;
 
 	UIActionHandler* globalActions() { return &m_globalActions; }
