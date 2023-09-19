@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::helpers::{get_uid, resolve_specification};
+use crate::helpers::{get_uid, resolve_specification, DieReference};
 
 use binaryninja::{
+    binaryview::{BinaryView, BinaryViewBase},
     debuginfo::{DebugFunctionInfo, DebugInfo},
     rc::*,
     templatesimplifier::simplify_str_to_str,
     types::{Conf, FunctionParameter, Type},
 };
 
-use gimli::{DebuggingInformationEntry, Reader, Unit};
+use gimli::{DebuggingInformationEntry, Dwarf, Reader, Unit};
 
 use log::error;
 use std::{
@@ -100,16 +101,22 @@ pub struct DebugInfoBuilder {
     types: HashMap<TypeUID, DebugType>,
     data_variables: HashMap<u64, (Option<CString>, TypeUID)>,
     names: HashMap<TypeUID, CString>,
+    default_address_size: usize,
 }
 
 impl DebugInfoBuilder {
-    pub fn new() -> Self {
+    pub fn new(view: &BinaryView) -> Self {
         DebugInfoBuilder {
             functions: vec![],
             types: HashMap::new(),
             data_variables: HashMap::new(),
             names: HashMap::new(),
+            default_address_size: view.address_size(),
         }
+    }
+
+    pub fn default_address_size(&self) -> usize {
+        self.default_address_size
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -146,10 +153,31 @@ impl DebugInfoBuilder {
     }
 
     pub fn add_type(&mut self, type_uid: TypeUID, name: CString, t: Ref<Type>, commit: bool) {
-        assert!(self
-            .types
-            .insert(type_uid, DebugType { name, t, commit })
-            .is_none());
+        if let Some(DebugType {
+            name: existing_name,
+            t: existing_type,
+            commit: _,
+        }) = self.types.insert(
+            type_uid,
+            DebugType {
+                name: name.clone(),
+                t: t.clone(),
+                commit,
+            },
+        ) {
+            if existing_type != t {
+                error!("DWARF info contains duplicate type definition. Overwriting type `{}` (named `{:?}`) with `{}` (named `{:?}`)",
+                    existing_type,
+                    existing_name,
+                    t,
+                    name
+                );
+            }
+        }
+    }
+
+    pub fn remove_type(&mut self, type_uid: TypeUID) {
+        self.types.remove(&type_uid);
     }
 
     // TODO : Non-copy?
@@ -186,15 +214,23 @@ impl DebugInfoBuilder {
 
     pub fn get_name<R: Reader<Offset = usize>>(
         &self,
+        dwarf: &Dwarf<R>,
         unit: &Unit<R>,
         entry: &DebuggingInformationEntry<R>,
     ) -> Option<CString> {
-        self.names
-            .get(&get_uid(
-                unit,
-                &unit.entry(resolve_specification(unit, entry)).unwrap(),
-            ))
-            .cloned()
+        match resolve_specification(dwarf, unit, entry) {
+            DieReference::Offset(entry_offset) => self
+                .names
+                .get(&get_uid(unit, &unit.entry(entry_offset).unwrap()))
+                .cloned(),
+            DieReference::UnitAndOffset((entry_unit, entry_offset)) => self
+                .names
+                .get(&get_uid(
+                    &entry_unit,
+                    &entry_unit.entry(entry_offset).unwrap(),
+                ))
+                .cloned(),
+        }
     }
 
     fn commit_types(&self, debug_info: &mut DebugInfo) {
@@ -228,16 +264,16 @@ impl DebugInfoBuilder {
             let parameters: Vec<FunctionParameter<CString>> = function
                 .parameters
                 .iter()
-                .filter_map(|parameter| {
-                    if let Some((name, uid)) = parameter {
-                        Some(FunctionParameter::new(
-                            self.get_type(*uid).unwrap().1,
-                            name.clone(),
-                            None,
-                        ))
-                    } else {
-                        None
+                .filter_map(|parameter| match parameter {
+                    Some((name, 0)) => {
+                        Some(FunctionParameter::new(Type::void(), name.clone(), None))
                     }
+                    Some((name, uid)) => Some(FunctionParameter::new(
+                        self.get_type(*uid).unwrap().1,
+                        name.clone(),
+                        None,
+                    )),
+                    _ => None,
                 })
                 .collect();
 

@@ -188,6 +188,12 @@ impl<'a, T: RefCountable> From<&'a Conf<Ref<T>>> for Conf<&'a T> {
     }
 }
 
+impl<'a, T: RefCountable> From<&'a Ref<T>> for Conf<&'a T> {
+    fn from(r: &'a Ref<T>) -> Self {
+        r.as_ref().into()
+    }
+}
+
 #[inline]
 pub fn min_confidence() -> u8 {
     u8::MIN
@@ -464,12 +470,12 @@ impl TypeBuilder {
         }
     }
 
-    pub fn get_named_type_reference(&self) -> Result<NamedTypeReference> {
+    pub fn get_named_type_reference(&self) -> Result<Ref<NamedTypeReference>> {
         let result = unsafe { BNGetTypeBuilderNamedTypeReference(self.handle) };
         if result.is_null() {
             Err(())
         } else {
-            Ok(unsafe { NamedTypeReference::from_raw(result) })
+            Ok(unsafe { NamedTypeReference::ref_from_raw(result) })
         }
     }
 
@@ -836,12 +842,12 @@ impl Type {
         }
     }
 
-    pub fn get_named_type_reference(&self) -> Result<NamedTypeReference> {
+    pub fn get_named_type_reference(&self) -> Result<Ref<NamedTypeReference>> {
         let result = unsafe { BNGetTypeNamedTypeReference(self.handle) };
         if result.is_null() {
             Err(())
         } else {
-            Ok(unsafe { NamedTypeReference::from_raw(result) })
+            Ok(unsafe { NamedTypeReference::ref_from_raw(result) })
         }
     }
 
@@ -857,12 +863,12 @@ impl Type {
         unsafe { BNGetTypeStackAdjustment(self.handle).into() }
     }
 
-    pub fn registered_name(&self) -> Result<NamedTypeReference> {
+    pub fn registered_name(&self) -> Result<Ref<NamedTypeReference>> {
         let result = unsafe { BNGetRegisteredTypeName(self.handle) };
         if result.is_null() {
             Err(())
         } else {
-            Ok(unsafe { NamedTypeReference::from_raw(result) })
+            Ok(unsafe { NamedTypeReference::ref_from_raw(result) })
         }
     }
 
@@ -1744,11 +1750,7 @@ impl StructureBuilder {
         self
     }
 
-    pub fn insert_member(
-        &mut self,
-        member: &StructureMember,
-        overwrite_existing: bool,
-    ) -> &mut Self {
+    pub fn insert_member(&self, member: &StructureMember, overwrite_existing: bool) -> &Self {
         let ty = member.ty.clone();
         self.insert(
             ty.as_ref(),
@@ -1762,14 +1764,14 @@ impl StructureBuilder {
     }
 
     pub fn insert<'a, S: BnStrCompatible, T: Into<Conf<&'a Type>>>(
-        &mut self,
+        &self,
         t: T,
         name: S,
         offset: u64,
         overwrite_existing: bool,
         access: MemberAccess,
         scope: MemberScope,
-    ) -> &mut Self {
+    ) -> &Self {
         let name = name.into_bytes_with_nul();
         unsafe {
             BNAddStructureBuilderMemberAtOffset(
@@ -1783,6 +1785,16 @@ impl StructureBuilder {
             );
         }
 
+        self
+    }
+
+    pub fn with_members<'a, S: BnStrCompatible, T: Into<Conf<&'a Type>>>(
+        &self,
+        members: impl IntoIterator<Item = (T, S)>,
+    ) -> &Self {
+        for (t, name) in members.into_iter() {
+            self.append(t, name, MemberAccess::NoAccess, MemberScope::NoScope);
+        }
         self
     }
 
@@ -1812,21 +1824,25 @@ impl StructureBuilder {
         unsafe { BNStructureBuilderPropagatesDataVariableReferences(self.handle) }
     }
 
-    pub fn base_structures(&self) -> Vec<BaseStructure> {
+    pub fn base_structures(&self) -> Result<Vec<BaseStructure>> {
         let mut count = 0usize;
         let bases = unsafe { BNGetBaseStructuresForStructureBuilder(self.handle, &mut count) };
-        let bases_slice = unsafe { slice::from_raw_parts_mut(bases, count) };
+        if bases.is_null() {
+            Err(())
+        } else {
+            let bases_slice = unsafe { slice::from_raw_parts_mut(bases, count) };
 
-        let result = bases_slice
-            .iter()
-            .map(|base| unsafe { BaseStructure::from_raw(*base) })
-            .collect::<Vec<_>>();
+            let result = bases_slice
+                .iter()
+                .map(|base| unsafe { BaseStructure::from_raw(*base) })
+                .collect::<Vec<_>>();
 
-        unsafe {
-            BNFreeBaseStructureList(bases, count);
+            unsafe {
+                BNFreeBaseStructureList(bases, count);
+            }
+
+            Ok(result)
         }
-
-        result
     }
 
     // TODO : The other methods in the python version (type, members, remove, replace, etc)
@@ -1840,7 +1856,7 @@ impl From<&Structure> for StructureBuilder {
 
 impl From<Vec<StructureMember>> for StructureBuilder {
     fn from(members: Vec<StructureMember>) -> StructureBuilder {
-        let mut builder = StructureBuilder::new();
+        let builder = StructureBuilder::new();
         for m in members {
             builder.insert_member(&m, false);
         }
@@ -1912,6 +1928,27 @@ impl Structure {
                 .collect();
 
             BNFreeStructureMemberList(members_raw, count);
+
+            Ok(result)
+        }
+    }
+
+    pub fn base_structures(&self) -> Result<Vec<BaseStructure>> {
+        let mut count = 0usize;
+        let bases = unsafe { BNGetBaseStructuresForStructure(self.handle, &mut count) };
+        if bases.is_null() {
+            Err(())
+        } else {
+            let bases_slice = unsafe { slice::from_raw_parts_mut(bases, count) };
+
+            let result = bases_slice
+                .iter()
+                .map(|base| unsafe { BaseStructure::from_raw(*base) })
+                .collect::<Vec<_>>();
+
+            unsafe {
+                BNFreeBaseStructureList(bases, count);
+            }
 
             Ok(result)
         }
@@ -2271,6 +2308,24 @@ impl Drop for QualifiedName {
     }
 }
 
+impl CoreArrayProvider for QualifiedName {
+    type Raw = BNQualifiedName;
+    type Context = ();
+}
+unsafe impl CoreOwnedArrayProvider for QualifiedName {
+    unsafe fn free(raw: *mut Self::Raw, count: usize, _context: &Self::Context) {
+        BNFreeTypeNameList(raw, count);
+    }
+}
+
+unsafe impl<'a> CoreArrayWrapper<'a> for QualifiedName {
+    type Wrapped = &'a QualifiedName;
+
+    unsafe fn wrap_raw(raw: &'a Self::Raw, _context: &'a Self::Context) -> Self::Wrapped {
+        mem::transmute(raw)
+    }
+}
+
 //////////////////////////
 // QualifiedNameAndType
 
@@ -2307,6 +2362,52 @@ unsafe impl CoreOwnedArrayProvider for QualifiedNameAndType {
 
 unsafe impl<'a> CoreArrayWrapper<'a> for QualifiedNameAndType {
     type Wrapped = &'a QualifiedNameAndType;
+
+    unsafe fn wrap_raw(raw: &'a Self::Raw, _context: &'a Self::Context) -> Self::Wrapped {
+        mem::transmute(raw)
+    }
+}
+
+//////////////////////////
+// QualifiedNameTypeAndId
+
+#[repr(transparent)]
+pub struct QualifiedNameTypeAndId(pub(crate) BNQualifiedNameTypeAndId);
+
+impl QualifiedNameTypeAndId {
+    pub fn name(&self) -> &QualifiedName {
+        unsafe { mem::transmute(&self.0.name) }
+    }
+
+    pub fn id(&self) -> &BnStr {
+        unsafe { BnStr::from_raw(self.0.id) }
+    }
+
+    pub fn type_object(&self) -> Guard<Type> {
+        unsafe { Guard::new(Type::from_raw(self.0.type_), self) }
+    }
+}
+
+impl Drop for QualifiedNameTypeAndId {
+    fn drop(&mut self) {
+        unsafe {
+            BNFreeQualifiedNameTypeAndId(&mut self.0);
+        }
+    }
+}
+
+impl CoreArrayProvider for QualifiedNameTypeAndId {
+    type Raw = BNQualifiedNameTypeAndId;
+    type Context = ();
+}
+unsafe impl CoreOwnedArrayProvider for QualifiedNameTypeAndId {
+    unsafe fn free(raw: *mut Self::Raw, count: usize, _context: &Self::Context) {
+        BNFreeTypeIdList(raw, count);
+    }
+}
+
+unsafe impl<'a> CoreArrayWrapper<'a> for QualifiedNameTypeAndId {
+    type Wrapped = &'a QualifiedNameTypeAndId;
 
     unsafe fn wrap_raw(raw: &'a Self::Raw, _context: &'a Self::Context) -> Self::Wrapped {
         mem::transmute(raw)

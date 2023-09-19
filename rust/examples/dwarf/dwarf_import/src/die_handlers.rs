@@ -29,6 +29,7 @@ pub fn handle_base_type<R: Reader<Offset = usize>>(
     dwarf: &Dwarf<R>,
     unit: &Unit<R>,
     entry: &DebuggingInformationEntry<R>,
+    debug_info_builder: &mut DebugInfoBuilder,
 ) -> Option<Ref<Type>> {
     // All base types have:
     //   DW_AT_name
@@ -40,13 +41,11 @@ pub fn handle_base_type<R: Reader<Offset = usize>>(
     //   * = Optional
 
     // TODO : By spec base types need to have a name, what if it's spec non-conforming?
-    let name = get_name(dwarf, unit, entry).expect("DW_TAG_base does not have name attribute");
-
-    // TODO : Handle other size specifiers (bits, offset, high_pc?, etc)
+    let name = debug_info_builder
+        .get_name(dwarf, unit, entry)
+        .expect("DW_TAG_base does not have name attribute");
     let size = get_size_as_usize(entry).expect("DW_TAG_base does not have size attribute");
-
     match entry.attr_value(constants::DW_AT_encoding) {
-        // TODO : Need more binaries to see what's going on
         Ok(Some(Encoding(encoding))) => {
             match encoding {
                 constants::DW_ATE_address => None,
@@ -80,6 +79,7 @@ pub fn handle_enum<R: Reader<Offset = usize>>(
     dwarf: &Dwarf<R>,
     unit: &Unit<R>,
     entry: &DebuggingInformationEntry<R>,
+    debug_info_builder: &mut DebugInfoBuilder,
 ) -> Option<Ref<Type>> {
     // All base types have:
     //   DW_AT_byte_size
@@ -114,9 +114,9 @@ pub fn handle_enum<R: Reader<Offset = usize>>(
     let mut children = tree.root().unwrap().children();
     while let Ok(Some(child)) = children.next() {
         if child.entry().tag() == constants::DW_TAG_enumerator {
-            let name =
-                get_name(dwarf, unit, child.entry()) // TODO : Might need to recover the full name here
-                    .expect("DW_TAG_enumeration_type does not have name attribute");
+            let name = debug_info_builder
+                .get_name(dwarf, unit, child.entry())
+                .expect("DW_TAG_enumeration_type does not have name attribute");
             let value = get_attr_as_u64(
                 &child
                     .entry()
@@ -199,8 +199,23 @@ pub fn handle_pointer<R: Reader<Offset = usize>>(
                 Some(reference_type),
             ))
         }
+    } else if let Some(entry_type_offset) = entry_type {
+        let parent_type = debug_info_builder.get_type(entry_type_offset).unwrap().1;
+        Some(Type::pointer_of_width(
+            parent_type.as_ref(),
+            debug_info_builder.default_address_size(),
+            false,
+            false,
+            Some(reference_type),
+        ))
     } else {
-        None
+        Some(Type::pointer_of_width(
+            Type::void().as_ref(),
+            debug_info_builder.default_address_size(),
+            false,
+            false,
+            Some(reference_type),
+        ))
     }
 }
 
@@ -289,6 +304,23 @@ pub fn handle_function<R: Reader<Offset = usize>>(
         None => Type::void(),
     };
 
+    // Alias function type in the case that it contains itself
+    if let Some(name) = debug_info_builder.get_name(dwarf, unit, entry) {
+        debug_info_builder.add_type(
+            get_uid(unit, entry),
+            name.clone(),
+            Type::named_type_from_type(
+                name,
+                &Type::function::<String, &binaryninja::types::Type>(
+                    return_type.as_ref(),
+                    &vec![],
+                    false,
+                ),
+            ),
+            false,
+        );
+    }
+
     let mut parameters: Vec<FunctionParameter<CString>> = vec![];
     let mut variable_arguments = false;
 
@@ -301,7 +333,7 @@ pub fn handle_function<R: Reader<Offset = usize>>(
             if let (Some(child_uid), Some(name)) = {
                 (
                     get_type(dwarf, unit, child.entry(), debug_info_builder),
-                    get_name(dwarf, unit, child.entry()),
+                    debug_info_builder.get_name(dwarf, unit, child.entry()),
                 )
             } {
                 let child_type = debug_info_builder.get_type(child_uid).unwrap().1;
@@ -310,6 +342,10 @@ pub fn handle_function<R: Reader<Offset = usize>>(
         } else if child.entry().tag() == constants::DW_TAG_unspecified_parameters {
             variable_arguments = true;
         }
+    }
+
+    if debug_info_builder.get_name(dwarf, unit, entry).is_some() {
+        debug_info_builder.remove_type(get_uid(unit, entry));
     }
 
     Some(Type::function(

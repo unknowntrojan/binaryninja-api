@@ -458,9 +458,20 @@ class MediumLevelILInstruction(BaseILInstruction):
 	       name: str = "root", parent: Optional['MediumLevelILInstruction'] = None) -> bool:
 		"""
 		Visits all MediumLevelILInstructions in the operands of this instruction and any sub-instructions.
+		In the callback you provide, you likely only need to interact with the second argument (see the example below).
 
 		:param MediumLevelILVisitorCallback cb: Callback function that takes the name of the operand, the operand, operand type, and parent instruction
 		:return: True if all instructions were visited, False if the callback returned False
+		:Example:
+		>>> def visitor(_a, inst, _c, _d) -> bool:
+		>>>     if isinstance(inst, Constant):
+		>>>         print(f"Found constant: {inst.constant}")
+		>>>         return False # Stop recursion (once we find a constant, don't recurse in to any sub-instructions (which there won't actually be any...))
+		>>>     # Otherwise, keep recursing the subexpressions of this instruction; if no return value is provided, it'll keep descending
+		>>>
+		>>> # Finds all constants used in the program
+		>>> for inst in current_mlil.instructions:
+		>>>     inst.visit(visitor)
 		"""
 		if cb(name, self, "MediumLevelILInstruction", parent) == False:
 			return False
@@ -1112,8 +1123,12 @@ class MediumLevelILVar(MediumLevelILInstruction, VariableInstruction):
 		return self._get_var(0)
 
 	@property
+	def var(self) -> variable.Variable:
+		return self._get_var(0)
+
+	@property
 	def detailed_operands(self) -> List[Tuple[str, MediumLevelILOperandType, str]]:
-		return [("src", self.src, "Variable")]
+		return [("var", self.var, "Variable")]
 
 
 @dataclass(frozen=True, repr=False, eq=False)
@@ -1404,8 +1419,12 @@ class MediumLevelILVarSsa(MediumLevelILInstruction, SSAVariableInstruction):
 		return self._get_var_ssa(0, 1)
 
 	@property
+	def var(self) -> SSAVariable:
+		return self._get_var_ssa(0, 1)
+
+	@property
 	def detailed_operands(self) -> List[Tuple[str, MediumLevelILOperandType, str]]:
-		return [("src", self.src, "SSAVariable")]
+		return [("var", self.var, "SSAVariable")]
 
 
 @dataclass(frozen=True, repr=False, eq=False)
@@ -3355,7 +3374,17 @@ class MediumLevelILFunction:
 	def get_non_ssa_instruction_index(self, instr: InstructionIndex) -> InstructionIndex:
 		return InstructionIndex(core.BNGetMediumLevelILNonSSAInstructionIndex(self.handle, instr))
 
-	def get_ssa_var_definition(self, ssa_var: SSAVariable) -> Optional[MediumLevelILInstruction]:
+	def get_ssa_var_definition(self, ssa_var: Union[SSAVariable, MediumLevelILVarSsa]) -> Optional[MediumLevelILInstruction]:
+		"""
+		Gets the instruction that contains the given SSA variable's definition.
+
+		Since SSA variables can only be defined once, this will return the single instruction where that occurs.
+		For SSA variable version 0s, which don't have definitions, this will return None instead.
+		"""
+		if isinstance(ssa_var, MediumLevelILVarSsa):
+			ssa_var = ssa_var.var
+		if not isinstance(ssa_var, SSAVariable):
+			raise ValueError("Expected SSAVariable")
 		var_data = ssa_var.var.to_BNVariable()
 		result = core.BNGetMediumLevelILSSAVarDefinition(self.handle, var_data, ssa_var.version)
 		if result >= core.BNGetMediumLevelILInstructionCount(self.handle):
@@ -3368,7 +3397,14 @@ class MediumLevelILFunction:
 			return None
 		return self[result]
 
-	def get_ssa_var_uses(self, ssa_var: SSAVariable) -> List[MediumLevelILInstruction]:
+	def get_ssa_var_uses(self, ssa_var: Union[SSAVariable, MediumLevelILVarSsa]) -> List[MediumLevelILInstruction]:
+		"""
+		Gets all the instructions that use the given SSA variable.
+		"""
+		if isinstance(ssa_var, MediumLevelILVarSsa):
+			ssa_var = ssa_var.var
+		if not isinstance(ssa_var, SSAVariable):
+			raise ValueError("Expected SSAVariable")
 		count = ctypes.c_ulonglong()
 		var_data = ssa_var.var.to_BNVariable()
 		instrs = core.BNGetMediumLevelILSSAVarUses(self.handle, var_data, ssa_var.version, count)

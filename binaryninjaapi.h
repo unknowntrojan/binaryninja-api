@@ -42,6 +42,7 @@
 #include <optional>
 #include <memory>
 #include "binaryninjacore.h"
+#include "exceptions.h"
 #include "json/json.h"
 
 #ifdef _MSC_VER
@@ -1679,93 +1680,6 @@ namespace BinaryNinja {
 
 	std::map<std::string, uint64_t> GetMemoryUsageInfo();
 
-	struct ExceptionWithStackTrace : std::exception
-	{
-		std::string m_originalMessage;
-		std::string m_message;
-		std::string m_stackTrace;
-		ExceptionWithStackTrace(const std::string& message)
-		{
-			m_originalMessage = message;
-			m_message = message;
-			if (getenv("BN_DEBUG_EXCEPTION_TRACES"))
-			{
-				char* stackTrace = BNGetCurrentStackTraceString();
-				if (stackTrace)
-				{
-					m_stackTrace = stackTrace;
-					m_message += "\n";
-					m_message += stackTrace;
-					BNFreeString(stackTrace);
-				}
-			}
-		}
-		ExceptionWithStackTrace(std::exception_ptr exc1, std::exception_ptr exc2)
-		{
-			m_originalMessage = "";
-			m_message = "";
-			if (exc1)
-			{
-				try
-				{
-					std::rethrow_exception(exc1);
-				}
-				catch (ExceptionWithStackTrace& stacky)
-				{
-					m_originalMessage = stacky.m_originalMessage;
-					m_message = stacky.m_message;
-				}
-				catch (std::exception& exc)
-				{
-					m_originalMessage = exc.what();
-					m_message = exc.what();
-				}
-				catch (...)
-				{
-					m_originalMessage = "Some unknown exception";
-					m_message = "Some unknown exception";
-				}
-			}
-			if (exc2)
-			{
-				try
-				{
-					std::rethrow_exception(exc2);
-				}
-				catch (ExceptionWithStackTrace& stacky)
-				{
-					m_originalMessage += "\n" + stacky.m_originalMessage;
-					m_message += "\n" + stacky.m_message;
-				}
-				catch (std::exception& exc)
-				{
-					m_originalMessage = exc.what();
-					m_message = exc.what();
-				}
-				catch (...)
-				{
-					m_originalMessage = "Some unknown exception";
-					m_message = "Some unknown exception";
-				}
-			}
-			if (getenv("BN_DEBUG_EXCEPTION_TRACES"))
-			{
-				char* stackTrace = BNGetCurrentStackTraceString();
-				if (stackTrace)
-				{
-					m_stackTrace = stackTrace;
-					m_message += "\n";
-					m_message += stackTrace;
-					BNFreeString(stackTrace);
-				}
-			}
-		}
-		const char* what() const noexcept override
-		{
-			return m_message.c_str();
-		}
-	};
-
 	/*!
 		\ingroup databuffer
 	*/
@@ -2520,6 +2434,7 @@ namespace BinaryNinja {
 	  private:
 		BNBinaryDataNotification m_callbacks;
 
+		static uint64_t NotificationBarrierCallback(void* ctxt, BNBinaryView* object);
 		static void DataWrittenCallback(void* ctxt, BNBinaryView* data, uint64_t offset, size_t len);
 		static void DataInsertedCallback(void* ctxt, BNBinaryView* data, uint64_t offset, size_t len);
 		static void DataRemovedCallback(void* ctxt, BNBinaryView* data, uint64_t offset, uint64_t len);
@@ -2531,44 +2446,115 @@ namespace BinaryNinja {
 		static void DataVariableRemovedCallback(void* ctxt, BNBinaryView* data, BNDataVariable* var);
 		static void DataVariableUpdatedCallback(void* ctxt, BNBinaryView* data, BNDataVariable* var);
 		static void SymbolAddedCallback(void* ctxt, BNBinaryView* view, BNSymbol* sym);
-		static void SymbolUpdatedCallback(void* ctxt, BNBinaryView* view, BNSymbol* sym);
 		static void SymbolRemovedCallback(void* ctxt, BNBinaryView* view, BNSymbol* sym);
+		static void SymbolUpdatedCallback(void* ctxt, BNBinaryView* view, BNSymbol* sym);
+
 		static void DataMetadataUpdatedCallback(void* ctxt, BNBinaryView* object, uint64_t offset);
 		static void TagTypeUpdatedCallback(void* ctxt, BNBinaryView* object, BNTagType* tagType);
 		static void TagAddedCallback(void* ctxt, BNBinaryView* object, BNTagReference* tagRef);
-		static void TagUpdatedCallback(void* ctxt, BNBinaryView* object, BNTagReference* tagRef);
 		static void TagRemovedCallback(void* ctxt, BNBinaryView* object, BNTagReference* tagRef);
+		static void TagUpdatedCallback(void* ctxt, BNBinaryView* object, BNTagReference* tagRef);
+
 		static void StringFoundCallback(void* ctxt, BNBinaryView* data, BNStringType type, uint64_t offset, size_t len);
-		static void StringRemovedCallback(
-		    void* ctxt, BNBinaryView* data, BNStringType type, uint64_t offset, size_t len);
+		static void StringRemovedCallback(void* ctxt, BNBinaryView* data, BNStringType type, uint64_t offset, size_t len);
 		static void TypeDefinedCallback(void* ctxt, BNBinaryView* data, BNQualifiedName* name, BNType* type);
 		static void TypeUndefinedCallback(void* ctxt, BNBinaryView* data, BNQualifiedName* name, BNType* type);
 		static void TypeReferenceChangedCallback(void* ctx, BNBinaryView* data, BNQualifiedName* name, BNType* type);
-		static void TypeFieldReferenceChangedCallback(
-		    void* ctx, BNBinaryView* data, BNQualifiedName* name, uint64_t offset);
+		static void TypeFieldReferenceChangedCallback(void* ctx, BNBinaryView* data, BNQualifiedName* name, uint64_t offset);
 		static void SegmentAddedCallback(void* ctx, BNBinaryView* data, BNSegment* segment);
-		static void SegmentUpdatedCallback(void* ctx, BNBinaryView* data, BNSegment* segment);
 		static void SegmentRemovedCallback(void* ctx, BNBinaryView* data, BNSegment* segment);
+		static void SegmentUpdatedCallback(void* ctx, BNBinaryView* data, BNSegment* segment);
+
 		static void SectionAddedCallback(void* ctx, BNBinaryView* data, BNSection* section);
-		static void SectionUpdatedCallback(void* ctx, BNBinaryView* data, BNSection* section);
 		static void SectionRemovedCallback(void* ctx, BNBinaryView* data, BNSection* section);
+		static void SectionUpdatedCallback(void* ctx, BNBinaryView* data, BNSection* section);
+
 		static void ComponentNameUpdatedCallback(void* ctxt, BNBinaryView* data, char* previousName, BNComponent* component);
 		static void ComponentAddedCallback(void* ctxt, BNBinaryView* data, BNComponent* component);
-		static void ComponentRemovedCallback(
-			void* ctxt, BNBinaryView* data, BNComponent* formerParent, BNComponent* component);
-		static void ComponentMovedCallback(
-			void* ctxt, BNBinaryView* data, BNComponent* formerParent, BNComponent* newParent, BNComponent* component);
+		static void ComponentRemovedCallback(void* ctxt, BNBinaryView* data, BNComponent* formerParent, BNComponent* component);
+		static void ComponentMovedCallback(void* ctxt, BNBinaryView* data, BNComponent* formerParent, BNComponent* newParent, BNComponent* component);
 		static void ComponentFunctionAddedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNFunction* function);
 		static void ComponentFunctionRemovedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNFunction* function);
 		static void ComponentDataVariableAddedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNDataVariable* var);
 		static void ComponentDataVariableRemovedCallback(void* ctxt, BNBinaryView* data, BNComponent* component, BNDataVariable* var);
 
 	  public:
+
+		enum NotificationType : uint64_t
+		{
+			NotificationBarrier = 1ULL << 0,
+			DataWritten = 1ULL << 1,
+			DataInserted = 1ULL << 2,
+			DataRemoved = 1ULL << 3,
+			FunctionAdded = 1ULL << 4,
+			FunctionRemoved = 1ULL << 5,
+			FunctionUpdated = 1ULL << 6,
+			FunctionUpdateRequested = 1ULL << 7,
+			DataVariableAdded = 1ULL << 8,
+			DataVariableRemoved = 1ULL << 9,
+			DataVariableUpdated = 1ULL << 10,
+			DataMetadataUpdated = 1ULL << 11,
+			TagTypeUpdated = 1ULL << 12,
+			TagAdded = 1ULL << 13,
+			TagRemoved = 1ULL << 14,
+			TagUpdated = 1ULL << 15,
+			SymbolAdded = 1ULL << 16,
+			SymbolRemoved = 1ULL << 17,
+			SymbolUpdated = 1ULL << 18,
+			StringFound = 1ULL << 19,
+			StringRemoved = 1ULL << 20,
+			TypeDefined = 1ULL << 21,
+			TypeUndefined = 1ULL << 22,
+			TypeReferenceChanged = 1ULL << 23,
+			TypeFieldReferenceChanged = 1ULL << 24,
+			SegmentAdded = 1ULL << 25,
+			SegmentRemoved = 1ULL << 26,
+			SegmentUpdated = 1ULL << 27,
+			SectionAdded = 1ULL << 28,
+			SectionRemoved = 1ULL << 29,
+			SectionUpdated = 1ULL << 30,
+			ComponentNameUpdated = 1ULL << 31,
+			ComponentAdded = 1ULL << 32,
+			ComponentRemoved = 1ULL << 33,
+			ComponentMoved = 1ULL << 34,
+			ComponentFunctionAdded = 1ULL << 35,
+			ComponentFunctionRemoved = 1ULL << 36,
+			ComponentDataVariableAdded = 1ULL << 37,
+			ComponentDataVariableRemoved = 1ULL << 38,
+
+			BinaryDataUpdates = DataWritten | DataInserted | DataRemoved,
+			FunctionLifetime = FunctionAdded | FunctionRemoved,
+			FunctionUpdates = FunctionLifetime | FunctionUpdated,
+			DataVariableLifetime = DataVariableAdded | DataVariableRemoved,
+			DataVariableUpdates = DataVariableLifetime | DataVariableUpdated,
+			TagLifetime = TagAdded | TagRemoved,
+			TagUpdates = TagLifetime | TagUpdated,
+			SymbolLifetime = SymbolAdded | SymbolRemoved,
+			SymbolUpdates = SymbolLifetime | SymbolUpdated,
+			StringUpdates = StringFound | StringRemoved,
+			TypeLifetime = TypeDefined | TypeUndefined,
+			TypeUpdates = TypeLifetime | TypeReferenceChanged | TypeFieldReferenceChanged,
+			SegmentLifetime = SegmentAdded | SegmentRemoved,
+			SegmentUpdates = SegmentLifetime | SegmentUpdated,
+			SectionLifetime = SectionAdded | SectionRemoved,
+			SectionUpdates = SectionLifetime | SectionUpdated,
+			ComponentUpdates = ComponentAdded | ComponentRemoved | ComponentMoved | ComponentFunctionAdded | ComponentFunctionRemoved | ComponentDataVariableAdded | ComponentDataVariableRemoved
+		};
+
+		using NotificationTypes = uint64_t;
+
 		BinaryDataNotification();
+		BinaryDataNotification(NotificationTypes notifications);
+
 		virtual ~BinaryDataNotification() {}
 
 		BNBinaryDataNotification* GetCallbacks() { return &m_callbacks; }
 
+		virtual uint64_t OnNotificationBarrier(BinaryView* view)
+		{
+			(void)view;
+			return 0;
+		}
 		virtual void OnBinaryDataWritten(BinaryView* view, uint64_t offset, size_t len)
 		{
 			(void)view;
@@ -2637,12 +2623,12 @@ namespace BinaryNinja {
 			(void)view;
 			(void)tagRef;
 		}
-		virtual void OnTagUpdated(BinaryView* view, const TagReference& tagRef)
+		virtual void OnTagRemoved(BinaryView* view, const TagReference& tagRef)
 		{
 			(void)view;
 			(void)tagRef;
 		}
-		virtual void OnTagRemoved(BinaryView* view, const TagReference& tagRef)
+		virtual void OnTagUpdated(BinaryView* view, const TagReference& tagRef)
 		{
 			(void)view;
 			(void)tagRef;
@@ -2652,12 +2638,12 @@ namespace BinaryNinja {
 			(void)view;
 			(void)sym;
 		}
-		virtual void OnSymbolUpdated(BinaryView* view, Symbol* sym)
+		virtual void OnSymbolRemoved(BinaryView* view, Symbol* sym)
 		{
 			(void)view;
 			(void)sym;
 		}
-		virtual void OnSymbolRemoved(BinaryView* view, Symbol* sym)
+		virtual void OnSymbolUpdated(BinaryView* view, Symbol* sym)
 		{
 			(void)view;
 			(void)sym;
@@ -2705,12 +2691,12 @@ namespace BinaryNinja {
 			(void)data;
 			(void)segment;
 		}
-		virtual void OnSegmentUpdated(BinaryView* data, Segment* segment)
+		virtual void OnSegmentRemoved(BinaryView* data, Segment* segment)
 		{
 			(void)data;
 			(void)segment;
 		}
-		virtual void OnSegmentRemoved(BinaryView* data, Segment* segment)
+		virtual void OnSegmentUpdated(BinaryView* data, Segment* segment)
 		{
 			(void)data;
 			(void)segment;
@@ -2720,12 +2706,12 @@ namespace BinaryNinja {
 			(void)data;
 			(void)section;
 		}
-		virtual void OnSectionUpdated(BinaryView* data, Section* section)
+		virtual void OnSectionRemoved(BinaryView* data, Section* section)
 		{
 			(void)data;
 			(void)section;
 		}
-		virtual void OnSectionRemoved(BinaryView* data, Section* section)
+		virtual void OnSectionUpdated(BinaryView* data, Section* section)
 		{
 			(void)data;
 			(void)section;
@@ -2955,6 +2941,9 @@ namespace BinaryNinja {
 	class QualifiedName : public NameList
 	{
 	  public:
+		using NameList::operator=;
+		using NameList::operator+;
+
 		QualifiedName();
 		QualifiedName(const BNQualifiedName* name);
 		QualifiedName(const std::string& name);
@@ -2979,6 +2968,9 @@ namespace BinaryNinja {
 	class NameSpace : public NameList
 	{
 	  public:
+		using NameList::operator=;
+		using NameList::operator+;
+
 		NameSpace();
 		NameSpace(const std::string& name);
 		NameSpace(const std::vector<std::string>& name);
@@ -4128,7 +4120,7 @@ namespace BinaryNinja {
 			\param platform Platform for the function to be loaded
 		    \param addr Virtual adddress of the function to be loaded
 		*/
-		void CreateUserFunction(Platform* platform, uint64_t start);
+		Ref<Function> CreateUserFunction(Platform* platform, uint64_t start);
 
 		/*! removes a user function from the list of functions
 
@@ -4882,6 +4874,24 @@ namespace BinaryNinja {
 		std::vector<Ref<Component>> GetFunctionParentComponents(Ref<Function> function) const;
 		std::vector<Ref<Component>> GetDataVariableParentComponents(DataVariable var) const;
 
+		/*! Heuristically determine if a string exists at the given address. This API checks for the following settings:
+			"analysis.unicode.utf8" - default true enables UTF-8 string detection
+			"analysis.unicode.utf16" - default true enables UTF-16 string detection
+			"analysis.unicode.utf32" - default true enables UTF-32 string detection
+			"analysis.unicode.blocks" - selects the Unicode blocks to use for detection
+
+			\param addr Address to check
+			\param value String value to populate
+			\param allowShortStrings Whether to allow short strings < 4 characters
+			\param allowLargeStrings If false strings must be less than "rendering.strings.maxAnnotationLength" (default 32)
+				If true strings must be less than "analysis.limits.maxStringLength" (default 16384)
+			\param childWidth Width of the characters
+			\return The type of string annotation found
+
+		*/
+		std::optional<BNStringType> CheckForStringAnnotationType(uint64_t addr, std::string& value,
+			bool allowShortStrings, bool allowLargeStrings, size_t childWidth);
+
 		/*! Check whether the given architecture supports assembling instructions
 
 			\param arch Architecture to check
@@ -5006,7 +5016,6 @@ namespace BinaryNinja {
 		AnalysisInfo GetAnalysisInfo();
 		BNAnalysisProgress GetAnalysisProgress();
 		Ref<BackgroundTask> GetBackgroundAnalysisTask();
-		size_t GetFullStringSize(uint64_t addr, BNStringType type);
 
 		/*! Returns the virtual address of the Function that occurs after the virtual address `addr`
 
@@ -5124,7 +5133,7 @@ namespace BinaryNinja {
 		QualifiedName GetTypeNameById(const std::string& id);
 		bool IsTypeAutoDefined(const QualifiedName& name);
 		QualifiedName DefineType(const std::string& id, const QualifiedName& defaultName, Ref<Type> type);
-		void DefineTypes(const std::vector<std::pair<std::string, QualifiedNameAndType>>& types, std::function<bool(size_t, size_t)> progress = {});
+		std::unordered_map<std::string, QualifiedName> DefineTypes(const std::vector<std::pair<std::string, QualifiedNameAndType>>& types, std::function<bool(size_t, size_t)> progress = {});
 		void DefineUserType(const QualifiedName& name, Ref<Type> type);
 		void DefineUserTypes(const std::vector<QualifiedNameAndType>& types, std::function<bool(size_t, size_t)> progress = {});
 		void DefineUserTypes(const std::vector<ParsedType>& types, std::function<bool(size_t, size_t)> progress = {});
@@ -8119,6 +8128,16 @@ namespace BinaryNinja {
 		*/
 		std::vector<InheritedStructureMember> GetMembersIncludingInherited(BinaryView* view) const;
 
+		/*! Get a structure member (including inherited members) at a certain offset
+
+		 	\param view The relevant binary view
+			\param offset Offset to check
+			\param result Reference to a InheritedStructureMember to copy the result to
+			\return Whether a member was found
+		*/
+		bool  GetMemberIncludingInheritedAtOffset(BinaryView* view, int64_t offset,
+			InheritedStructureMember& result) const;
+
 		/*! Get a structure member by name
 
 			\param name Name of the member to retrieve
@@ -8540,14 +8559,13 @@ namespace BinaryNinja {
 		    ...
 		 	// Create a clone of the default workflow named "core.function.myWorkflowName"
 		    Ref<Workflow> wf = BinaryNinja::Workflow::Instance()->Clone("core.function.myWorkflowName");
-		 	wf->RegisterActivity(new BinaryNinja::Activity(
-				"core.function.myWorkflowName.resolveMethodCalls", &MyClass::MyActionMethod));
+		 	wf->RegisterActivity(new BinaryNinja::Activity("core.function.myWorkflowName.resolveMethodCalls", &MyClass::MyActionMethod));
 		 	\endcode
 
-			\param name Name of the activity to register
+			\param configuration a JSON representation of the activity configuration
 			\param action Workflow action, a function taking a Ref<AnalysisContext> as an argument.
 		*/
-		Activity(const std::string& name, const std::function<void(Ref<AnalysisContext>)>& action);
+		Activity(const std::string& configuration, const std::function<void(Ref<AnalysisContext>)>& action);
 		Activity(BNActivity* activity);
 		virtual ~Activity();
 
@@ -8611,20 +8629,23 @@ namespace BinaryNinja {
 			\param description A JSON description of the Activity
 			\return
 		*/
-		bool RegisterActivity(Ref<Activity> activity, const std::string& description = "");
-		bool RegisterActivity(Ref<Activity> activity, std::initializer_list<const char*> initializer)
-		{
-			return RegisterActivity(activity, std::vector<std::string>(initializer.begin(), initializer.end()));
-		}
+
+		/*! Register an Activity with this Workflow
+
+			\param configuration a JSON representation of the activity configuration
+			\param action Workflow action, a function taking a Ref<AnalysisContext> as an argument.
+			\param subactivities The list of Activities to assign
+			\return
+		*/
+		Ref<Activity> RegisterActivity(const std::string& configuration, const std::function<void(Ref<AnalysisContext>)>& action, const std::vector<std::string>& subactivities = {});
+
 		/*! Register an Activity with this Workflow
 
 			\param activity The Activity to register
 			\param subactivities The list of Activities to assign
-			\param description A JSON description of the Activity
 			\return
 		*/
-		bool RegisterActivity(
-		    Ref<Activity> activity, const std::vector<std::string>& subactivities, const std::string& description = "");
+		Ref<Activity> RegisterActivity(Ref<Activity> activity, const std::vector<std::string>& subactivities = {});
 
 		/*! Determine if an Activity exists in this Workflow
 
@@ -8734,8 +8755,6 @@ namespace BinaryNinja {
 		*/
 		Ref<FlowGraph> GetGraph(const std::string& activity = "", bool sequential = false);
 		void ShowReport(const std::string& name);
-
-		// bool Run(const std::string& activity, Ref<AnalysisContext> analysisContext);
 	};
 
 	class DisassemblySettings :
@@ -11817,6 +11836,7 @@ namespace BinaryNinja {
 		std::set<size_t> GetSSAMemoryUses(size_t version) const;
 		bool IsSSAVarLive(const SSAVariable& var) const;
 
+		std::set<size_t> GetVariableSSAVersions(const Variable& var) const;
 		std::set<size_t> GetVariableDefinitions(const Variable& var) const;
 		std::set<size_t> GetVariableUses(const Variable& var) const;
 
@@ -12129,6 +12149,7 @@ namespace BinaryNinja {
 		bool IsSSAVarLiveAt(const SSAVariable& var, const size_t instr) const;
 		bool IsVarLiveAt(const Variable& var, const size_t instr) const;
 
+		std::set<size_t> GetVariableSSAVersions(const Variable& var) const;
 		std::set<size_t> GetVariableDefinitions(const Variable& var) const;
 		std::set<size_t> GetVariableUses(const Variable& var) const;
 		size_t GetSSAVarVersionAtInstruction(const Variable& var, size_t instr) const;
@@ -14278,6 +14299,7 @@ namespace BinaryNinja {
 		static BNScriptingProviderExecuteResult ExecuteScriptInputCallback(void* ctxt, const char* input);
 		static BNScriptingProviderExecuteResult ExecuteScriptFromFilenameCallback(void *ctxt, const char* filename);
 		static void CancelScriptInputCallback(void* ctxt);
+		static void ReleaseBinaryViewCallback(void* ctxt, BNBinaryView* view);
 		static void SetCurrentBinaryViewCallback(void* ctxt, BNBinaryView* view);
 		static void SetCurrentFunctionCallback(void* ctxt, BNFunction* func);
 		static void SetCurrentBasicBlockCallback(void* ctxt, BNBasicBlock* block);
@@ -14292,6 +14314,7 @@ namespace BinaryNinja {
 		virtual BNScriptingProviderExecuteResult ExecuteScriptInput(const std::string& input) = 0;
 		virtual BNScriptingProviderExecuteResult ExecuteScriptInputFromFilename(const std::string& filename) = 0;
 		virtual void CancelScriptInput();
+		virtual void ReleaseBinaryView(BinaryView* view);
 		virtual void SetCurrentBinaryView(BinaryView* view);
 		virtual void SetCurrentFunction(Function* func);
 		virtual void SetCurrentBasicBlock(BasicBlock* block);
@@ -14325,6 +14348,7 @@ namespace BinaryNinja {
 		virtual BNScriptingProviderExecuteResult ExecuteScriptInput(const std::string& input) override;
 		virtual BNScriptingProviderExecuteResult ExecuteScriptInputFromFilename(const std::string& filename) override;
 		virtual void CancelScriptInput() override;
+		virtual void ReleaseBinaryView(BinaryView* view) override;
 		virtual void SetCurrentBinaryView(BinaryView* view) override;
 		virtual void SetCurrentFunction(Function* func) override;
 		virtual void SetCurrentBasicBlock(BasicBlock* block) override;

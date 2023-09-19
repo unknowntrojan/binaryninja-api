@@ -6,6 +6,7 @@
 #include "binaryninjaapi.h"
 #include "viewframe.h"
 #include "render.h"
+#include "progressindicator.h"
 #include "commentdialog.h"
 #include "menus.h"
 #include "statusbarwidget.h"
@@ -122,6 +123,8 @@ class StickyHeader: public QWidget
 	uint64_t m_gutterWidthChars;
 
 	LinearViewLine m_line;
+	QProgressIndicator* m_updateIndicator;
+
 public:
 	StickyHeader(BinaryViewRef data, LinearView* parent);
 
@@ -215,6 +218,8 @@ class BINARYNINJAUIAPI LinearView : public QAbstractScrollArea, public View, pub
 	std::shared_mutex m_cacheMutex;
 	BinaryNinja::Ref<BinaryNinja::LinearViewCursor> m_topPosition, m_bottomPosition;
 	std::vector<LinearViewLine> m_lines;
+	size_t m_emptyPrevCursors;
+	size_t m_emptyNextCursors;
 	size_t m_topLine;
 	std::optional<double> m_topOrderingIndexOffset;
 
@@ -408,6 +413,8 @@ public:
 	virtual BasicBlockRef getCurrentBasicBlock() override;
 	virtual ArchitectureRef getCurrentArchitecture() override;
 	virtual size_t getCurrentILInstructionIndex() override;
+	virtual size_t getSelectionStartILInstructionIndex() override;
+	virtual BNILIndexRange getILIndexRange() override;
 	virtual bool navigate(uint64_t offset) override;
 	virtual bool navigateToFunction(FunctionRef func, uint64_t offset) override;
 	virtual bool navigateToViewLocation(const ViewLocation& viewLocation, bool center = false) override;

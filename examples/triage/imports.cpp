@@ -5,7 +5,7 @@
 #include "fontsettings.h"
 
 
-GenericImportsModel::GenericImportsModel(BinaryViewRef data)
+GenericImportsModel::GenericImportsModel(QWidget* parent, BinaryViewRef data) : QAbstractItemModel(parent)
 {
 	m_data = data;
 	m_typeLibCol = 1;
@@ -210,6 +210,8 @@ void GenericImportsModel::setFilter(const std::string& filterText)
 			m_entries.push_back(entry);
 		else if (FilteredView::match(getNamespace(entry).toStdString(), filterText))
 			m_entries.push_back(entry);
+		else if (FilteredView::match(std::to_string(entry->GetOrdinal()), filterText))
+			m_entries.push_back(entry);
 	}
 	performSort(m_sortCol, m_sortOrder);
 	endResetModel();
@@ -226,7 +228,7 @@ ImportsTreeView::ImportsTreeView(ImportsWidget* parent, TriageView* view, Binary
 	m_actionHandler.setupActionHandler(this);
 	m_actionHandler.setActionContext([=]() { return m_view->actionContext(); });
 
-	m_model = new GenericImportsModel(m_data);
+	m_model = new GenericImportsModel(this, m_data);
 	setModel(m_model);
 	setRootIsDecorated(false);
 	setUniformRowHeights(true);

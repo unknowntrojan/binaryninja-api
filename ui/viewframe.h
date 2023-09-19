@@ -228,6 +228,8 @@ class BINARYNINJAUIAPI View
 	virtual BNFunctionGraphType getILViewType() { return InvalidILViewType; }
 	virtual void setILViewType(BNFunctionGraphType ilViewType) {}
 	virtual size_t getCurrentILInstructionIndex() { return BN_INVALID_EXPR; }
+	virtual size_t getSelectionStartILInstructionIndex() { return BN_INVALID_EXPR; }
+	virtual BNILIndexRange getILIndexRange() { return {BN_INVALID_EXPR, BN_INVALID_EXPR}; }
 
 	virtual QFont getFont() = 0;
 	virtual DisassemblySettingsRef getDisassemblySettings();
@@ -368,6 +370,7 @@ class BINARYNINJAUIAPI ViewFrame : public QWidget
 	bool m_graphViewPreferred = false;
 	QStringList m_viewTypePriority;
 	int m_preferredSyncGroup = 1;
+	bool m_aboutToClose = false;
 
 	UIActionHandler m_actionHandler;
 
@@ -446,6 +449,8 @@ class BINARYNINJAUIAPI ViewFrame : public QWidget
 	QWidget* getViewWidgetForType(const QString& type);
 	View* getViewForType(const QString& type);
 
+	void aboutToClose() { m_aboutToClose = true; }
+	bool isAboutToClose() { return m_aboutToClose; }
 	bool closeRequest();
 	void closing();
 	void clearViewLocation();
@@ -465,6 +470,8 @@ class BINARYNINJAUIAPI ViewFrame : public QWidget
 	    \param data View for saving history entries
 	 */
 	void writeHistoryEntries(BinaryViewRef data);
+	bool canNavigateBack();
+	bool canNavigateForward();
 	void back();
 	void forward();
 

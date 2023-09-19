@@ -830,9 +830,20 @@ class HighLevelILInstruction(BaseILInstruction):
 	       name: str = "root", parent: Optional['HighLevelILInstruction'] = None) -> bool:
 		"""
 		Visits all HighLevelILInstructions in the operands of this instruction and any sub-instructions.
+		In the callback you provide, you likely only need to interact with the second argument (see the example below).
 
 		:param HighLevelILVisitorCallback cb: Callback function that takes the name of the operand, the operand, operand type, and parent instruction
 		:return: True if all instructions were visited, False if the callback returned False
+		:Example:
+		>>> def visitor(_a, inst, _c, _d) -> bool:
+		>>>     if isinstance(inst, Constant):
+		>>>         print(f"Found constant: {inst.constant}")
+		>>>         return False # Stop recursion (once we find a constant, don't recurse in to any sub-instructions (which there won't actually be any...))
+		>>>     # Otherwise, keep recursing the subexpressions of this instruction; if no return value is provided, it'll keep descending
+		>>>
+		>>> # Finds all constants used in the program
+		>>> for inst in bv.hlil_instructions:
+		>>>     inst.visit(visitor)
 		"""
 		if cb(name, self, "HighLevelILInstruction", parent) == False:
 			return False
@@ -2605,7 +2616,17 @@ class HighLevelILFunction:
 	def get_non_ssa_instruction_index(self, instr: int) -> int:
 		return core.BNGetHighLevelILNonSSAInstructionIndex(self.handle, instr)
 
-	def get_ssa_var_definition(self, ssa_var: 'mediumlevelil.SSAVariable') -> Optional[HighLevelILInstruction]:
+	def get_ssa_var_definition(self, ssa_var: Union['mediumlevelil.SSAVariable', HighLevelILVarSsa]) -> Optional[HighLevelILInstruction]:
+		"""
+		Gets the instruction that contains the given SSA variable's definition.
+
+		Since SSA variables can only be defined once, this will return the single instruction where that occurs.
+		For SSA variable version 0s, which don't have definitions, this will return None instead.
+		"""
+		if isinstance(ssa_var, HighLevelILVarSsa):
+			ssa_var = ssa_var.var
+		if not isinstance(ssa_var, mediumlevelil.SSAVariable):
+			raise ValueError("Expected SSAVariable")
 		var_data = ssa_var.var.to_BNVariable()
 		result = core.BNGetHighLevelILSSAVarDefinition(self.handle, var_data, ssa_var.version)
 		if result >= core.BNGetHighLevelILExprCount(self.handle):
@@ -2618,7 +2639,14 @@ class HighLevelILFunction:
 			return None
 		return HighLevelILInstruction.create(self, ExpressionIndex(result))
 
-	def get_ssa_var_uses(self, ssa_var: 'mediumlevelil.SSAVariable') -> List[HighLevelILInstruction]:
+	def get_ssa_var_uses(self, ssa_var: Union['mediumlevelil.SSAVariable', HighLevelILVarSsa]) -> List[HighLevelILInstruction]:
+		"""
+		Gets all the instructions that use the given SSA variable.
+		"""
+		if isinstance(ssa_var, HighLevelILVarSsa):
+			ssa_var = ssa_var.var
+		if not isinstance(ssa_var, mediumlevelil.SSAVariable):
+			raise ValueError("Expected SSAVariable")
 		count = ctypes.c_ulonglong()
 		var_data = ssa_var.var.to_BNVariable()
 		instrs = core.BNGetHighLevelILSSAVarUses(self.handle, var_data, ssa_var.version, count)

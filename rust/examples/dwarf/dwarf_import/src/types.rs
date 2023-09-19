@@ -23,7 +23,7 @@ use binaryninja::{
     },
 };
 
-use gimli::{constants, AttributeValue::UnitRef, DebuggingInformationEntry, Dwarf, Reader, Unit};
+use gimli::{constants, DebuggingInformationEntry, Dwarf, Reader, Unit};
 
 use std::ffi::CString;
 
@@ -33,7 +33,7 @@ pub(crate) fn parse_data_variable<R: Reader<Offset = usize>>(
     entry: &DebuggingInformationEntry<R>,
     debug_info_builder: &mut DebugInfoBuilder,
 ) {
-    let full_name = debug_info_builder.get_name(unit, entry);
+    let full_name = debug_info_builder.get_name(dwarf, unit, entry);
     let type_uid = get_type(dwarf, unit, entry, debug_info_builder);
 
     let address = if let Ok(Some(attr)) = entry.attr(constants::DW_AT_location) {
@@ -92,14 +92,14 @@ fn do_structure_parse<R: Reader<Offset = usize>>(
     }
 
     let full_name = if get_name(dwarf, unit, entry).is_some() {
-        debug_info_builder.get_name(unit, entry)
+        debug_info_builder.get_name(dwarf, unit, entry)
     } else {
         None
     };
 
     // Create structure with proper size
     let size = get_size_as_u64(entry).unwrap_or(0);
-    let mut structure_builder: StructureBuilder = StructureBuilder::new();
+    let structure_builder: StructureBuilder = StructureBuilder::new();
     structure_builder
         .set_packed(true)
         .set_width(size)
@@ -126,14 +126,17 @@ fn do_structure_parse<R: Reader<Offset = usize>>(
         if child.entry().tag() == constants::DW_TAG_member {
             if let Some(child_type_id) = get_type(dwarf, unit, child.entry(), debug_info_builder) {
                 if let Some((_, child_type)) = debug_info_builder.get_type(child_type_id) {
-                    if let Some(child_name) = get_name(dwarf, unit, child.entry()).map_or(
-                        if child_type.type_class() == TypeClass::StructureTypeClass {
-                            Some(CString::new("").unwrap())
-                        } else {
-                            None
-                        },
-                        Some,
-                    ) {
+                    if let Some(child_name) = debug_info_builder
+                        .get_name(dwarf, unit, child.entry())
+                        .map_or(
+                            if child_type.type_class() == TypeClass::StructureTypeClass {
+                                Some(CString::new("").unwrap())
+                            } else {
+                                None
+                            },
+                            Some,
+                        )
+                    {
                         // TODO : support DW_AT_data_bit_offset for offset as well
                         if let Ok(Some(raw_struct_offset)) =
                             child.entry().attr(constants::DW_AT_data_member_location)
@@ -203,51 +206,59 @@ pub(crate) fn get_type<R: Reader<Offset = usize>>(
         return None;
     }
 
-    // Passing through typedef was necessary at one point, but it seems that parsing has gotten robust enough not to explode on this....leaving it here just in case though
-    // // Do not trust typedefs; typedefs should be transparent; typedefs mask the base type they refer to, not other typedefs
-    // // This is the DIE that contains the type of the current DIE
-    // let entry_type = if entry.tag() == constants::DW_TAG_typedef {
-    //     let mut typedef_type = entry.clone();
-    //     while typedef_type.tag() == constants::DW_TAG_typedef {
-    //         if let Ok(Some(UnitRef(typedef_type_offset))) =
-    //             typedef_type.attr_value(constants::DW_AT_type)
-    //         {
-    //             typedef_type = unit.entry(typedef_type_offset).unwrap();
-    //         } else {
-    //             return None;
-    //         }
-    //     }
-    //     get_type(dwarf, unit, &typedef_type, debug_info_builder)
-    // } else
     let entry_type =
-        if let Ok(Some(UnitRef(entry_type_offset))) = entry.attr_value(constants::DW_AT_type) {
+        if let Some(die_reference) = get_attr_die(dwarf, unit, entry, constants::DW_AT_type) {
             // This needs to recurse first (before the early return below) to ensure all sub-types have been parsed
-            get_type(
-                dwarf,
-                unit,
-                &unit.entry(entry_type_offset).unwrap(),
-                debug_info_builder,
-            )
-        } else if let Ok(Some(UnitRef(entry_type_offset))) =
-            entry.attr_value(constants::DW_AT_specification)
+            match die_reference {
+                DieReference::Offset(entry_offset) => get_type(
+                    dwarf,
+                    unit,
+                    &unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+                DieReference::UnitAndOffset((entry_unit, entry_offset)) => get_type(
+                    dwarf,
+                    &entry_unit,
+                    &entry_unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+            }
+        } else if let Some(die_reference) =
+            get_attr_die(dwarf, unit, entry, constants::DW_AT_specification)
         {
             // This needs to recurse first (before the early return below) to ensure all sub-types have been parsed
-            get_type(
-                dwarf,
-                unit,
-                &unit.entry(entry_type_offset).unwrap(),
-                debug_info_builder,
-            )
-        } else if let Ok(Some(UnitRef(entry_type_offset))) =
-            entry.attr_value(constants::DW_AT_abstract_origin)
+            match die_reference {
+                DieReference::Offset(entry_offset) => get_type(
+                    dwarf,
+                    unit,
+                    &unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+                DieReference::UnitAndOffset((entry_unit, entry_offset)) => get_type(
+                    dwarf,
+                    &entry_unit,
+                    &entry_unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+            }
+        } else if let Some(die_reference) =
+            get_attr_die(dwarf, unit, entry, constants::DW_AT_abstract_origin)
         {
             // This needs to recurse first (before the early return below) to ensure all sub-types have been parsed
-            get_type(
-                dwarf,
-                unit,
-                &unit.entry(entry_type_offset).unwrap(),
-                debug_info_builder,
-            )
+            match die_reference {
+                DieReference::Offset(entry_offset) => get_type(
+                    dwarf,
+                    unit,
+                    &unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+                DieReference::UnitAndOffset((entry_unit, entry_offset)) => get_type(
+                    dwarf,
+                    &entry_unit,
+                    &entry_unit.entry(entry_offset).unwrap(),
+                    debug_info_builder,
+                ),
+            }
         } else {
             None
         };
@@ -261,7 +272,10 @@ pub(crate) fn get_type<R: Reader<Offset = usize>>(
     // Collect the required information to create a type and add it to the type map. Also, add the dependencies of this type to the type's typeinfo
     // Create the type, make a TypeInfo for it, and add it to the debug info
     let (type_def, mut commit): (Option<Ref<Type>>, bool) = match entry.tag() {
-        constants::DW_TAG_base_type => (handle_base_type(dwarf, unit, entry), false),
+        constants::DW_TAG_base_type => (
+            handle_base_type(dwarf, unit, entry, debug_info_builder),
+            false,
+        ),
 
         constants::DW_TAG_structure_type => {
             return do_structure_parse(
@@ -292,13 +306,15 @@ pub(crate) fn get_type<R: Reader<Offset = usize>>(
         }
 
         // Enum
-        constants::DW_TAG_enumeration_type => (handle_enum(dwarf, unit, entry), true),
+        constants::DW_TAG_enumeration_type => {
+            (handle_enum(dwarf, unit, entry, debug_info_builder), true)
+        }
 
         // Basic types
         constants::DW_TAG_typedef => handle_typedef(
             debug_info_builder,
             entry_type,
-            debug_info_builder.get_name(unit, entry).unwrap(),
+            debug_info_builder.get_name(dwarf, unit, entry).unwrap(),
         ),
         constants::DW_TAG_pointer_type => (
             handle_pointer(
@@ -333,7 +349,7 @@ pub(crate) fn get_type<R: Reader<Offset = usize>>(
         ),
 
         // Strange Types
-        constants::DW_TAG_unspecified_type => (Some(Type::void()), false), // TODO : Maybe true here
+        constants::DW_TAG_unspecified_type => (Some(Type::void()), false),
         constants::DW_TAG_subroutine_type => (
             handle_function(dwarf, unit, entry, debug_info_builder, entry_type),
             false,
@@ -350,7 +366,7 @@ pub(crate) fn get_type<R: Reader<Offset = usize>>(
     // Wrap our resultant type in a TypeInfo so that the internal DebugInfo class can manage it
     if let Some(type_def) = type_def {
         let name = if get_name(dwarf, unit, entry).is_some() {
-            debug_info_builder.get_name(unit, entry)
+            debug_info_builder.get_name(dwarf, unit, entry)
         } else {
             None
         }

@@ -138,14 +138,15 @@ class ScriptingInstance:
 			self._cb.executeScriptInput = self._cb.executeScriptInput.__class__(self._execute_script_input)
 			self._cb.executeScriptInputFromFilename = self._cb.executeScriptInputFromFilename.__class__(self._execute_script_input_from_filename)
 			self._cb.cancelScriptInput = self._cb.cancelScriptInput.__class__(self._cancel_script_input)
+			self._cb.releaseBinaryView = self._cb.releaseBinaryView.__class__(self._release_binary_view)
 			self._cb.setCurrentBinaryView = self._cb.setCurrentBinaryView.__class__(self._set_current_binary_view)
 			self._cb.setCurrentFunction = self._cb.setCurrentFunction.__class__(self._set_current_function)
 			self._cb.setCurrentBasicBlock = self._cb.setCurrentBasicBlock.__class__(self._set_current_basic_block)
 			self._cb.setCurrentAddress = self._cb.setCurrentAddress.__class__(self._set_current_address)
 			self._cb.setCurrentSelection = self._cb.setCurrentSelection.__class__(self._set_current_selection)
 			self._cb.completeInput = self._cb.completeInput.__class__(self._complete_input)
-			self._cb.completeInput.restype = ctypes.c_void_p
 			self._cb.stop = self._cb.stop.__class__(self._stop)
+			self._completed_input = None
 			self.handle = core.BNInitScriptingInstance(provider.handle, self._cb)
 			self.delimiters = ' \t\n`~!@#$%^&*()-=+{}\\|;:\'",<>/?'
 		else:
@@ -189,10 +190,17 @@ class ScriptingInstance:
 			log_error(traceback.format_exc())
 			return ScriptingProviderExecuteResult.ScriptExecutionCancelled
 
+	def _release_binary_view(self, ctxt, view):
+		try:
+			binaryview.BinaryView._cache_remove(view)
+		except:
+			log_error(traceback.format_exc())
+
 	def _set_current_binary_view(self, ctxt, view):
 		try:
 			if view:
 				view = binaryview.BinaryView(handle=core.BNNewViewReference(view))
+				binaryview.BinaryView._cache_insert(view)
 			else:
 				view = None
 			self.perform_set_current_binary_view(view)
@@ -244,12 +252,10 @@ class ScriptingInstance:
 		try:
 			if not isinstance(text, str):
 				text = text.decode("utf-8")
-			return ctypes.cast(
-			    self.perform_complete_input(text, state).encode("utf-8"), ctypes.c_void_p
-			).value  # type: ignore
+			return core.BNAllocString(self.perform_complete_input(text, state))
 		except:
 			log_error(traceback.format_exc())
-			return "".encode("utf-8")
+			return core.BNAllocString("")
 
 	def _stop(self, ctxt):
 		try:
@@ -680,6 +686,7 @@ class PythonScriptingInstance(ScriptingInstance):
 				"current_il_index",
 				"current_il_function",
 				"current_il_instruction",
+				"current_il_instructions",
 				"current_il_basic_block"
 			}
 			self.locals = BlacklistedDict(
@@ -709,6 +716,7 @@ class PythonScriptingInstance(ScriptingInstance):
 			self.active_file_offset = None
 			self.active_dbg = None
 			self.active_il_index = 0
+			self.selection_start_il_index = 0
 			self.active_il_function = None
 
 			self.locals.blacklist_enabled = False
@@ -899,6 +907,9 @@ from binaryninja import *
 					elif action_handler is not None:
 						action_context = action_handler.actionContext()
 
+					if view is not None:
+						self.selection_start_il_index = view.getSelectionStartILInstructionIndex()
+
 					token_state = None
 					token = None
 					var = None
@@ -935,15 +946,26 @@ from binaryninja import *
 							except:
 								self.locals["current_il_instruction"] = None
 
+							invalid_il_index = 0xffffffffffffffff
+							if invalid_il_index not in (self.active_il_index, self.selection_start_il_index):
+								il_start = min(self.active_il_index, self.selection_start_il_index)
+								il_end = max(self.active_il_index, self.selection_start_il_index)
+								self.locals["current_il_instructions"] = (self.active_il_function[i] for i in \
+																		  range(il_start, il_end + 1))
+							else:
+								self.locals["current_il_instructions"] = None
+
 							if self.locals["current_il_instruction"]:
 								self.locals["current_il_basic_block"] = self.locals["current_il_instruction"].il_basic_block
 						else:
 							self.locals["current_il_instruction"] = None
+							self.locals["current_il_instructions"] = None
 							self.locals["current_il_basic_block"] = None
 					else:
 						self.locals["current_il_index"] = None
 						self.locals["current_il_function"] = None
 						self.locals["current_il_instruction"] = None
+						self.locals["current_il_instructions"] = None
 						self.locals["current_il_basic_block"] = None
 						self.active_il_function = None
 
@@ -971,6 +993,7 @@ from binaryninja import *
 				self.locals["current_il_index"] = None
 				self.locals["current_il_function"] = None
 				self.locals["current_il_instruction"] = None
+				self.locals["current_il_instructions"] = None
 				self.locals["current_il_basic_block"] = None
 
 			self.locals.blacklist_enabled = True
@@ -1141,7 +1164,7 @@ from binaryninja import *
 		if not os.path.exists(filename) and os.path.isfile(filename):
 			return ScriptingProviderExecuteResult.InvalidScriptInput  # TODO: maybe this isn't the best result to use?
 		try:
-			with open(filename, 'r') as fp:
+			with open(filename, 'rb') as fp:
 				file_contents = fp.read()
 		except IOError:
 			# File was not readable or something went horribly wrong
@@ -1150,7 +1173,7 @@ from binaryninja import *
 		if len(file_contents) == 0:
 			return ScriptingProviderExecuteResult.SuccessfulScriptExecution
 
-		_code = code.compile_command(file_contents, filename, 'exec')
+		_code = code.compile_command(file_contents.decode('utf-8'), filename, 'exec')
 		self.interpreter.locals['__file__'] = filename
 		self.interpreter.locals['__name__'] = '__main__'
 		self.interpreter.execute(_code)

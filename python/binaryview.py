@@ -29,8 +29,9 @@ import json
 import inspect
 import os
 from typing import Callable, Generator, Optional, Union, Tuple, List, Mapping, Any, \
-	Iterator, Iterable, KeysView, ItemsView, ValuesView
+	Iterator, Iterable, KeysView, ItemsView, ValuesView, Dict
 from dataclasses import dataclass
+from enum import IntFlag
 
 import collections
 from collections import defaultdict, OrderedDict, deque
@@ -41,7 +42,8 @@ from . import _binaryninjacore as core
 from . import decorators
 from .enums import (
     AnalysisState, SymbolType, Endianness, ModificationStatus, StringType, SegmentFlag, SectionSemantics, FindFlag,
-    TypeClass, BinaryViewEventType, FunctionGraphType, TagReferenceType, TagTypeType, RegisterValueType, LogLevel
+    TypeClass, BinaryViewEventType, FunctionGraphType, TagReferenceType, TagTypeType, RegisterValueType, LogLevel,
+	DisassemblyOption
 )
 from . import associateddatastore  # required for _BinaryViewAssociatedDataStore
 from .log import log_warn, log_error, Logger
@@ -129,9 +131,131 @@ class ReferenceSource:
 		return mlil.hlil if mlil is not None else None
 
 
+class NotificationType(IntFlag):
+	NotificationBarrier = 1 << 0
+	DataWritten = 1 << 1
+	DataInserted = 1 << 2
+	DataRemoved = 1 << 3
+	FunctionAdded = 1 << 4
+	FunctionRemoved = 1 << 5
+	FunctionUpdated = 1 << 6
+	FunctionUpdateRequested = 1 << 7
+	DataVariableAdded = 1 << 8
+	DataVariableRemoved = 1 << 9
+	DataVariableUpdated = 1 << 10
+	DataMetadataUpdated = 1 << 11
+	TagTypeUpdated = 1 << 12
+	TagAdded = 1 << 13
+	TagRemoved = 1 << 14
+	TagUpdated = 1 << 15
+	SymbolAdded = 1 << 16
+	SymbolRemoved = 1 << 17
+	SymbolUpdated = 1 << 18
+	StringFound = 1 << 19
+	StringRemoved = 1 << 20
+	TypeDefined = 1 << 21
+	TypeUndefined = 1 << 22
+	TypeReferenceChanged = 1 << 23
+	TypeFieldReferenceChanged = 1 << 24
+	SegmentAdded = 1 << 25
+	SegmentRemoved = 1 << 26
+	SegmentUpdated = 1 << 27
+	SectionAdded = 1 << 28
+	SectionRemoved = 1 << 29
+	SectionUpdated = 1 << 30
+	ComponentNameUpdated = 1 << 31
+	ComponentAdded = 1 << 32
+	ComponentRemoved = 1 << 33
+	ComponentMoved = 1 << 34
+	ComponentFunctionAdded = 1 << 35
+	ComponentFunctionRemoved = 1 << 36
+	ComponentDataVariableAdded = 1 << 37
+	ComponentDataVariableRemoved = 1 << 38
+	BinaryDataUpdates = DataWritten | DataInserted | DataRemoved
+	FunctionLifetime = FunctionAdded | FunctionRemoved
+	FunctionUpdates = FunctionLifetime | FunctionUpdated
+	DataVariableLifetime = DataVariableAdded | DataVariableRemoved
+	DataVariableUpdates = DataVariableLifetime | DataVariableUpdated
+	TagLifetime = TagAdded | TagRemoved
+	TagUpdates = TagLifetime | TagUpdated
+	SymbolLifetime = SymbolAdded | SymbolRemoved
+	SymbolUpdates = SymbolLifetime | SymbolUpdated
+	StringUpdates = StringFound | StringRemoved
+	TypeLifetime = TypeDefined | TypeUndefined
+	TypeUpdates = TypeLifetime | TypeReferenceChanged | TypeFieldReferenceChanged
+	SegmentLifetime = SegmentAdded | SegmentRemoved
+	SegmentUpdates = SegmentLifetime | SegmentUpdated
+	SectionLifetime = SectionAdded | SectionRemoved
+	SectionUpdates = SectionLifetime | SectionUpdated
+	ComponentUpdates = (ComponentAdded | ComponentRemoved | ComponentMoved | ComponentFunctionAdded | ComponentFunctionRemoved | ComponentDataVariableAdded | ComponentDataVariableRemoved)
+
+
 class BinaryDataNotification:
-	def __init__(self):
-		pass
+	"""
+	``class BinaryDataNotification`` provides an interface for receiving event notifications. Usage requires inheriting
+	from this interface, overriding the relevant event handlers, and registering the `BinaryDataNotification` instance
+	with a `BinaryView` using the `register_notification` method.
+
+	By default, a `BinaryDataNotification` instance receives notifications for all available notification types. It
+	is recommended for users of this interface to initialize the `BinaryDataNotification` base class with with specific
+	callbacks of interest by passing the appropriate `NotificationType` flags into the `__init__` constructor.
+
+	Handlers provided by the user should aim to limit the amount of processing within the callback. The
+	callback context holds a global lock, preventing other threads from making progress during the callback phase.
+	While most of the API can be used safely during this time, care must be taken when issuing a call that can block,
+	as waiting for a thread requiring the global lock can result in deadlock.
+
+	The `NotificationBarrier` is a special `NotificationType` that is disabled by default. To enable it, the
+	`NotificationBarrier` flag must be passed to `__init__`. This notification is designed to facilitate efficient
+	batch processing of other notification types. The idea is to collect other notifications of interest into a cache,
+	which can be very efficient as it doesn't require additional locks. After some time, the core generates a
+	`NotificationBarrier` event, providing a safe context to move the cache for processing by a different thread.
+
+	To control the time of the next `NotificationBarrier` event, return the desired number of milliseconds until
+	the next event from the `NotificationBarrier` callback. Returning zero quiesces future `NotificationBarrier`
+	events. If the `NotificationBarrier` is quiesced, the reception of a new callback of interest automatically
+	generates a new `NotificationBarrier` call after that notification is delivered. This mechanism effectively
+	allows throttling and quiescing when necessary.
+
+	.. note:: Note that the core generates a `NotificationBarrier` as part of the `BinaryDataNotification` registration \
+	process. Registering the same `BinaryDataNotification` instance again results in a gratuitous `NotificationBarrier` \
+	event, which can be useful in situations requiring a safe context for processing due to some other asynchronous \
+	event (e.g., user interaction).
+
+	:Example:
+
+	>>> class NotifyTest(binaryninja.BinaryDataNotification):
+	... 	def __init__(self):
+	... 		super(NotifyTest, self).__init__(binaryninja.NotificationType.NotificationBarrier | binaryninja.NotificationType.FunctionLifetime | binaryninja.NotificationType.FunctionUpdated)
+	... 		self.received_event = False
+	... 	def notification_barrier(self, view: 'BinaryView') -> int:
+	... 		has_events = self.received_event
+	... 		self.received_event = False
+	... 		log_info("notification_barrier")
+	... 		if has_events:
+	... 			return 250
+	... 		else:
+	... 			return 0
+	... 	def function_added(self, view: 'BinaryView', func: '_function.Function') -> None:
+	... 		self.received_event = True
+	... 		log_info("function_added")
+	... 	def function_removed(self, view: 'BinaryView', func: '_function.Function') -> None:
+	... 		self.received_event = True
+	... 		log_info("function_removed")
+	... 	def function_updated(self, view: 'BinaryView', func: '_function.Function') -> None:
+	... 		self.received_event = True
+	... 		log_info("function_updated")
+	...
+	>>>
+	>>> bv.register_notification(NotifyTest())
+	>>>
+	"""
+
+	def __init__(self, notifications: NotificationType = None):
+		self.notifications = notifications
+
+	def notification_barrier(self, view: 'BinaryView') -> int:
+		return 0
 
 	def data_written(self, view: 'BinaryView', offset: int, length: int) -> None:
 		pass
@@ -466,50 +590,139 @@ class BinaryDataNotificationCallbacks:
 		self._notify = notify
 		self._cb = core.BNBinaryDataNotification()
 		self._cb.context = 0
-		self._cb.dataWritten = self._cb.dataWritten.__class__(self._data_written)
-		self._cb.dataInserted = self._cb.dataInserted.__class__(self._data_inserted)
-		self._cb.dataRemoved = self._cb.dataRemoved.__class__(self._data_removed)
-		self._cb.functionAdded = self._cb.functionAdded.__class__(self._function_added)
-		self._cb.functionRemoved = self._cb.functionRemoved.__class__(self._function_removed)
-		self._cb.functionUpdated = self._cb.functionUpdated.__class__(self._function_updated)
-		self._cb.functionUpdateRequested = self._cb.functionUpdateRequested.__class__(self._function_update_requested)
-		self._cb.dataVariableAdded = self._cb.dataVariableAdded.__class__(self._data_var_added)
-		self._cb.dataVariableRemoved = self._cb.dataVariableRemoved.__class__(self._data_var_removed)
-		self._cb.dataVariableUpdated = self._cb.dataVariableUpdated.__class__(self._data_var_updated)
-		self._cb.dataMetadataUpdated = self._cb.dataMetadataUpdated.__class__(self._data_metadata_updated)
-		self._cb.tagTypeUpdated = self._cb.tagTypeUpdated.__class__(self._tag_type_updated)
-		self._cb.tagAdded = self._cb.tagAdded.__class__(self._tag_added)
-		self._cb.tagUpdated = self._cb.tagUpdated.__class__(self._tag_updated)
-		self._cb.tagRemoved = self._cb.tagRemoved.__class__(self._tag_removed)
-		self._cb.symbolAdded = self._cb.symbolAdded.__class__(self._symbol_added)
-		self._cb.symbolUpdated = self._cb.symbolUpdated.__class__(self._symbol_updated)
-		self._cb.symbolRemoved = self._cb.symbolRemoved.__class__(self._symbol_removed)
-		self._cb.stringFound = self._cb.stringFound.__class__(self._string_found)
-		self._cb.stringRemoved = self._cb.stringRemoved.__class__(self._string_removed)
-		self._cb.typeDefined = self._cb.typeDefined.__class__(self._type_defined)
-		self._cb.typeUndefined = self._cb.typeUndefined.__class__(self._type_undefined)
-		self._cb.typeReferenceChanged = self._cb.typeReferenceChanged.__class__(self._type_ref_changed)
-		self._cb.typeFieldReferenceChanged = self._cb.typeFieldReferenceChanged.__class__(self._type_field_ref_changed)
-		self._cb.segmentAdded = self._cb.segmentAdded.__class__(self._segment_added)
-		self._cb.segmentUpdated = self._cb.segmentUpdated.__class__(self._segment_updated)
-		self._cb.segmentRemoved = self._cb.segmentRemoved.__class__(self._segment_removed)
-		self._cb.sectionAdded = self._cb.sectionAdded.__class__(self._section_added)
-		self._cb.sectionUpdated = self._cb.sectionUpdated.__class__(self._section_updated)
-		self._cb.sectionRemoved = self._cb.sectionRemoved.__class__(self._section_removed)
-		self._cb.componentNameUpdated = self._cb.componentNameUpdated.__class__(self._component_name_updated)
-		self._cb.componentAdded = self._cb.componentAdded.__class__(self._component_added)
-		self._cb.componentRemoved = self._cb.componentRemoved.__class__(self._component_removed)
-		self._cb.componentMoved = self._cb.componentMoved.__class__(self._component_moved)
-		self._cb.componentFunctionAdded = self._cb.componentFunctionAdded.__class__(self._component_function_added)
-		self._cb.componentFunctionRemoved = self._cb.componentFunctionRemoved.__class__(self._component_function_removed)
-		self._cb.componentDataVariableAdded = self._cb.componentDataVariableAdded.__class__(self._component_data_variable_added)
-		self._cb.componentDataVariableRemoved = self._cb.componentDataVariableRemoved.__class__(self._component_data_variable_removed)
+		if (not hasattr(notify, 'notifications')) or (hasattr(notify, 'notifications') and notify.notifications is None):
+			self._cb.notificationBarrier = self._cb.notificationBarrier
+			self._cb.dataWritten = self._cb.dataWritten.__class__(self._data_written)
+			self._cb.dataInserted = self._cb.dataInserted.__class__(self._data_inserted)
+			self._cb.dataRemoved = self._cb.dataRemoved.__class__(self._data_removed)
+			self._cb.functionAdded = self._cb.functionAdded.__class__(self._function_added)
+			self._cb.functionRemoved = self._cb.functionRemoved.__class__(self._function_removed)
+			self._cb.functionUpdated = self._cb.functionUpdated.__class__(self._function_updated)
+			self._cb.functionUpdateRequested = self._cb.functionUpdateRequested.__class__(self._function_update_requested)
+			self._cb.dataVariableAdded = self._cb.dataVariableAdded.__class__(self._data_var_added)
+			self._cb.dataVariableRemoved = self._cb.dataVariableRemoved.__class__(self._data_var_removed)
+			self._cb.dataVariableUpdated = self._cb.dataVariableUpdated.__class__(self._data_var_updated)
+			self._cb.dataMetadataUpdated = self._cb.dataMetadataUpdated.__class__(self._data_metadata_updated)
+			self._cb.tagTypeUpdated = self._cb.tagTypeUpdated.__class__(self._tag_type_updated)
+			self._cb.tagAdded = self._cb.tagAdded.__class__(self._tag_added)
+			self._cb.tagRemoved = self._cb.tagRemoved.__class__(self._tag_removed)
+			self._cb.tagUpdated = self._cb.tagUpdated.__class__(self._tag_updated)
+
+			self._cb.symbolAdded = self._cb.symbolAdded.__class__(self._symbol_added)
+			self._cb.symbolRemoved = self._cb.symbolRemoved.__class__(self._symbol_removed)
+			self._cb.symbolUpdated = self._cb.symbolUpdated.__class__(self._symbol_updated)
+			self._cb.stringFound = self._cb.stringFound.__class__(self._string_found)
+			self._cb.stringRemoved = self._cb.stringRemoved.__class__(self._string_removed)
+			self._cb.typeDefined = self._cb.typeDefined.__class__(self._type_defined)
+			self._cb.typeUndefined = self._cb.typeUndefined.__class__(self._type_undefined)
+			self._cb.typeReferenceChanged = self._cb.typeReferenceChanged.__class__(self._type_ref_changed)
+			self._cb.typeFieldReferenceChanged = self._cb.typeFieldReferenceChanged.__class__(self._type_field_ref_changed)
+			self._cb.segmentAdded = self._cb.segmentAdded.__class__(self._segment_added)
+			self._cb.segmentRemoved = self._cb.segmentRemoved.__class__(self._segment_removed)
+			self._cb.segmentUpdated = self._cb.segmentUpdated.__class__(self._segment_updated)
+
+			self._cb.sectionAdded = self._cb.sectionAdded.__class__(self._section_added)
+			self._cb.sectionRemoved = self._cb.sectionRemoved.__class__(self._section_removed)
+			self._cb.sectionUpdated = self._cb.sectionUpdated.__class__(self._section_updated)
+			self._cb.componentNameUpdated = self._cb.componentNameUpdated.__class__(self._component_name_updated)
+			self._cb.componentAdded = self._cb.componentAdded.__class__(self._component_added)
+			self._cb.componentRemoved = self._cb.componentRemoved.__class__(self._component_removed)
+			self._cb.componentMoved = self._cb.componentMoved.__class__(self._component_moved)
+			self._cb.componentFunctionAdded = self._cb.componentFunctionAdded.__class__(self._component_function_added)
+			self._cb.componentFunctionRemoved = self._cb.componentFunctionRemoved.__class__(self._component_function_removed)
+			self._cb.componentDataVariableAdded = self._cb.componentDataVariableAdded.__class__(self._component_data_variable_added)
+			self._cb.componentDataVariableRemoved = self._cb.componentDataVariableRemoved.__class__(self._component_data_variable_removed)
+		else:
+			if notify.notifications & NotificationType.NotificationBarrier:
+				self._cb.notificationBarrier = self._cb.notificationBarrier.__class__(self._notification_barrier)
+			if notify.notifications & NotificationType.DataWritten:
+				self._cb.dataWritten = self._cb.dataWritten.__class__(self._data_written)
+			if notify.notifications & NotificationType.DataInserted:
+				self._cb.dataInserted = self._cb.dataInserted.__class__(self._data_inserted)
+			if notify.notifications & NotificationType.DataRemoved:
+				self._cb.dataRemoved = self._cb.dataRemoved.__class__(self._data_removed)
+			if notify.notifications & NotificationType.FunctionAdded:
+				self._cb.functionAdded = self._cb.functionAdded.__class__(self._function_added)
+			if notify.notifications & NotificationType.FunctionRemoved:
+				self._cb.functionRemoved = self._cb.functionRemoved.__class__(self._function_removed)
+			if notify.notifications & NotificationType.FunctionUpdated:
+				self._cb.functionUpdated = self._cb.functionUpdated.__class__(self._function_updated)
+			if notify.notifications & NotificationType.FunctionUpdateRequested:
+				self._cb.functionUpdateRequested = self._cb.functionUpdateRequested.__class__(self._function_update_requested)
+			if notify.notifications & NotificationType.DataVariableAdded:
+				self._cb.dataVariableAdded = self._cb.dataVariableAdded.__class__(self._data_var_added)
+			if notify.notifications & NotificationType.DataVariableRemoved:
+				self._cb.dataVariableRemoved = self._cb.dataVariableRemoved.__class__(self._data_var_removed)
+			if notify.notifications & NotificationType.DataVariableUpdated:
+				self._cb.dataVariableUpdated = self._cb.dataVariableUpdated.__class__(self._data_var_updated)
+			if notify.notifications & NotificationType.DataMetadataUpdated:
+				self._cb.dataMetadataUpdated = self._cb.dataMetadataUpdated.__class__(self._data_metadata_updated)
+			if notify.notifications & NotificationType.TagTypeUpdated:
+				self._cb.tagTypeUpdated = self._cb.tagTypeUpdated.__class__(self._tag_type_updated)
+			if notify.notifications & NotificationType.TagAdded:
+				self._cb.tagAdded = self._cb.tagAdded.__class__(self._tag_added)
+			if notify.notifications & NotificationType.TagRemoved:
+				self._cb.tagRemoved = self._cb.tagRemoved.__class__(self._tag_removed)
+			if notify.notifications & NotificationType.TagUpdated:
+				self._cb.tagUpdated = self._cb.tagUpdated.__class__(self._tag_updated)
+			if notify.notifications & NotificationType.SymbolAdded:
+				self._cb.symbolAdded = self._cb.symbolAdded.__class__(self._symbol_added)
+			if notify.notifications & NotificationType.SymbolRemoved:
+				self._cb.symbolRemoved = self._cb.symbolRemoved.__class__(self._symbol_removed)
+			if notify.notifications & NotificationType.SymbolUpdated:
+				self._cb.symbolUpdated = self._cb.symbolUpdated.__class__(self._symbol_updated)
+			if notify.notifications & NotificationType.StringFound:
+				self._cb.stringFound = self._cb.stringFound.__class__(self._string_found)
+			if notify.notifications & NotificationType.StringRemoved:
+				self._cb.stringRemoved = self._cb.stringRemoved.__class__(self._string_removed)
+			if notify.notifications & NotificationType.TypeDefined:
+				self._cb.typeDefined = self._cb.typeDefined.__class__(self._type_defined)
+			if notify.notifications & NotificationType.TypeUndefined:
+				self._cb.typeUndefined = self._cb.typeUndefined.__class__(self._type_undefined)
+			if notify.notifications & NotificationType.TypeReferenceChanged:
+				self._cb.typeReferenceChanged = self._cb.typeReferenceChanged.__class__(self._type_ref_changed)
+			if notify.notifications & NotificationType.TypeFieldReferenceChanged:
+				self._cb.typeFieldReferenceChanged = self._cb.typeFieldReferenceChanged.__class__(self._type_field_ref_changed)
+			if notify.notifications & NotificationType.SegmentAdded:
+				self._cb.segmentAdded = self._cb.segmentAdded.__class__(self._segment_added)
+			if notify.notifications & NotificationType.SegmentRemoved:
+				self._cb.segmentRemoved = self._cb.segmentRemoved.__class__(self._segment_removed)
+			if notify.notifications & NotificationType.SegmentUpdated:
+				self._cb.segmentUpdated = self._cb.segmentUpdated.__class__(self._segment_updated)
+			if notify.notifications & NotificationType.SectionAdded:
+				self._cb.sectionAdded = self._cb.sectionAdded.__class__(self._section_added)
+			if notify.notifications & NotificationType.SectionRemoved:
+				self._cb.sectionRemoved = self._cb.sectionRemoved.__class__(self._section_removed)
+			if notify.notifications & NotificationType.SectionUpdated:
+				self._cb.sectionUpdated = self._cb.sectionUpdated.__class__(self._section_updated)
+			if notify.notifications & NotificationType.ComponentNameUpdated:
+				self._cb.componentNameUpdated = self._cb.componentNameUpdated.__class__(self._component_name_updated)
+			if notify.notifications & NotificationType.ComponentAdded:
+				self._cb.componentAdded = self._cb.componentAdded.__class__(self._component_added)
+			if notify.notifications & NotificationType.ComponentRemoved:
+				self._cb.componentRemoved = self._cb.componentRemoved.__class__(self._component_removed)
+			if notify.notifications & NotificationType.ComponentMoved:
+				self._cb.componentMoved = self._cb.componentMoved.__class__(self._component_moved)
+			if notify.notifications & NotificationType.ComponentFunctionAdded:
+				self._cb.componentFunctionAdded = self._cb.componentFunctionAdded.__class__(self._component_function_added)
+			if notify.notifications & NotificationType.ComponentFunctionRemoved:
+				self._cb.componentFunctionRemoved = self._cb.componentFunctionRemoved.__class__(self._component_function_removed)
+			if notify.notifications & NotificationType.ComponentDataVariableAdded:
+				self._cb.componentDataVariableAdded = self._cb.componentDataVariableAdded.__class__(self._component_data_variable_added)
+			if notify.notifications & NotificationType.ComponentDataVariableRemoved:
+				self._cb.componentDataVariableRemoved = self._cb.componentDataVariableRemoved.__class__(self._component_data_variable_removed)
 
 	def _register(self) -> None:
 		core.BNRegisterDataNotification(self._view.handle, self._cb)
 
 	def _unregister(self) -> None:
 		core.BNUnregisterDataNotification(self._view.handle, self._cb)
+
+	def _notification_barrier(self, ctxt, view: core.BNBinaryView) -> int:
+		try:
+			return self._notify.notification_barrier(self._view)
+		except OSError:
+			log_error(traceback.format_exc())
 
 	def _data_written(self, ctxt, view: core.BNBinaryView, offset: int, length: int) -> None:
 		try:
@@ -947,7 +1160,6 @@ class BinaryViewType(metaclass=_BinaryViewTypeMetaclass):
 			return None
 		return BinaryView(file_metadata=data.file, handle=view)
 
-	@deprecation.deprecated(deprecated_in="3.5.4378", details="Use `binaryninja.load` instead")
 	def open(self, src: PathType, file_metadata: 'filemetadata.FileMetadata' = None) -> Optional['BinaryView']:
 		data = BinaryView.open(src, file_metadata)
 		if data is None:
@@ -985,7 +1197,7 @@ class BinaryViewType(metaclass=_BinaryViewTypeMetaclass):
 	def load(
 	    cls, source: Union[str, bytes, bytearray, 'databuffer.DataBuffer', 'os.PathLike', 'BinaryView'], update_analysis: Optional[bool] = True,
 	    progress_func: Optional[ProgressFuncType] = None, options: Mapping[str, Any] = {}) -> Optional['BinaryView']:
-		BinaryView.load(source, update_analysis, progress_func, options)
+		return BinaryView.load(source, update_analysis, progress_func, options)
 
 	def parse(self, data: 'BinaryView') -> Optional['BinaryView']:
 		view = core.BNParseBinaryViewOfType(self.handle, data.handle)
@@ -1759,12 +1971,39 @@ class BinaryView:
 	registered_view_type = None
 	_associated_data = {}
 	_registered_instances = []
+	_cached_instances = {}
+
+	@classmethod
+	def _cache_insert(cls, instance):
+		key = ctypes.addressof(instance.handle.contents)
+		if key not in cls._cached_instances:
+			cls._cached_instances[ctypes.addressof(instance.handle.contents)] = instance
+
+	@classmethod
+	def _cache_remove(cls, handle):
+		key = ctypes.addressof(handle.contents)
+		if key in cls._cached_instances:
+			cls._cached_instances.pop(key)
+
+	@classmethod
+	def _cache_contains(cls, handle):
+		return ctypes.addressof(handle.contents) in cls._cached_instances
+
+	def __new__(cls, file_metadata=None, parent_view=None, handle=None):
+		if handle:
+			key = ctypes.addressof(handle.contents)
+			if key in cls._cached_instances:
+				core.BNFreeBinaryView(handle) # release the already taken reference since we are pulling from the cache
+				return cls._cached_instances[key]
+		return super().__new__(cls)
 
 	def __init__(
 	    self, file_metadata: Optional['filemetadata.FileMetadata'] = None, parent_view: Optional['BinaryView'] = None,
 	    handle: Optional[core.BNBinaryViewHandle] = None
 	):
 		if handle is not None:
+			if self.__class__._cache_contains(handle):
+				return
 			_handle = handle
 			if file_metadata is None:
 				self._file = filemetadata.FileMetadata(handle=core.BNGetFileForView(handle))
@@ -2037,7 +2276,6 @@ class BinaryView:
 			return None
 
 	@staticmethod
-	@deprecation.deprecated(deprecated_in="3.5.4378", details="Use `binaryninja.load` instead")
 	def open(src, file_metadata=None) -> Optional['BinaryView']:
 		binaryninja._init_plugins()
 		if isinstance(src, fileaccessor.FileAccessor):
@@ -2137,10 +2375,10 @@ class BinaryView:
 			handle = core.BNLoadFilename(source, update_analysis, progress_cfunc, metadata.Metadata(options).handle)
 		elif isinstance(source, bytes) or isinstance(source, bytearray) or isinstance(source, databuffer.DataBuffer):
 			raw_view = BinaryView.new(source)
-			handle = core.BNLoadBinaryView(raw_view.handle, update_analysis, progress_cfunc, metadata.Metadata(options).handle)
+			handle = core.BNLoadBinaryView(raw_view.handle, update_analysis, progress_cfunc, metadata.Metadata(options).handle, False)
 		else:
 			raise NotImplementedError
-		return BinaryView(handle=handle)
+		return BinaryView(handle=handle) if handle else None
 
 	@classmethod
 	def _unregister(cls, view: core.BNBinaryView) -> None:
@@ -3385,7 +3623,7 @@ class BinaryView:
 		The View name is created by combining a View type (e.g. "Graph") with a BinaryView type (e.g. "Mach-O"),
 		seperated by a colon, resulting in something like "Graph:Mach-O".
 
-		:param str view_name: View name.
+		:param str view_name: view name
 		:param int offset: address to navigate to
 		:return: whether navigation succeeded
 		:rtype: bool
@@ -3643,12 +3881,18 @@ class BinaryView:
 
 	def register_notification(self, notify: BinaryDataNotification) -> None:
 		"""
-		`register_notification` provides a mechanism for receiving callbacks for various analysis events. A full
-		list of callbacks can be seen in :py:class:`BinaryDataNotification`.
+		`register_notification` enables the receipt of callbacks for various analysis events. A full
+		list of callbacks is available in the :py:class:`BinaryDataNotification` class. If the
+		`notification_barrier` is enabled, then it is triggered upon the initial call to
+		`register_notification`. Subsequent calls for an already registered ``notify`` instance
+		also trigger a `notification_barrier` callback.
 
 		:param BinaryDataNotification notify: notify is a subclassed instance of :py:class:`BinaryDataNotification`.
 		:rtype: None
 		"""
+		if notify in self._notifications:
+			self._notifications[notify]._register()
+			return
 		cb = BinaryDataNotificationCallbacks(self, notify)
 		cb._register()
 		self._notifications[notify] = cb
@@ -3738,7 +3982,8 @@ class BinaryView:
 		"""
 		core.BNRemoveAnalysisFunction(self.handle, func.handle, update_refs)
 
-	def create_user_function(self, addr: int, plat: Optional['_platform.Platform'] = None) -> '_function.Function':
+	def create_user_function(self, addr: int, plat: Optional['_platform.Platform'] = None) \
+			-> Optional['_function.Function']:
 		"""
 		``create_user_function`` add a new *user* function of the given ``plat`` at the virtual address ``addr``
 
@@ -3756,7 +4001,10 @@ class BinaryView:
 			if self.platform is None:
 				raise Exception("Attempting to call create_user_function with no specified platform")
 			plat = self.platform
-		return _function.Function(self, core.BNCreateUserFunction(self.handle, plat.handle, addr))
+		func = core.BNCreateUserFunction(self.handle, plat.handle, addr)
+		if func is None:
+			return None
+		return _function.Function(self, func)
 
 	def remove_user_function(self, func: '_function.Function') -> None:
 		"""
@@ -6902,6 +7150,89 @@ class BinaryView:
 		_name = _types.QualifiedName(name)._to_core_struct()
 		core.BNDefineUserAnalysisType(self.handle, _name, type_obj.handle)
 
+	def define_types(self, types: List[Tuple[str, Optional['_types.QualifiedNameType'], StringOrType]], progress_func: Optional[ProgressFuncType]) -> Mapping[str, '_types.QualifiedName']:
+		"""
+		``define_types`` registers multiple types as though calling :py:func:`define_type` multiple times.
+		The difference with this plural version is that it is optimized for adding many types
+		at the same time, using knowledge of all types at add-time to improve runtime.
+		There is an optional ``progress_func`` callback function in case you want updates for a long-running call.
+
+		.. warning:: This method should only be used for automatically generated types, see :py:func:`define_user_types` for interactive plugin uses.
+
+		The return values of this function provide a map of each type id and which name was chosen for that type
+		(which may be different from the requested name).
+
+		:param types: List of type ids/names/definitions for the new types. Check :py:func:`define_type` for more details.
+		:param progress: Function to call for progress updates
+		:return: A map of all the chosen names for the defined types with their ids.
+		"""
+		api_types = (core.BNQualifiedNameTypeAndId * len(types))()
+		for i, (type_id, default_name, type_obj) in enumerate(types):
+			if isinstance(type_obj, str):
+				(type_obj, new_name) = self.parse_type_string(type_obj)
+				if default_name is None:
+					default_name = new_name
+			assert default_name is not None, "default_name can only be None if named type is derived from string passed to type_obj"
+			api_types[i].name = _types.QualifiedName(default_name)._to_core_struct()
+			api_types[i].id = core.cstr(type_id)
+			api_types[i].type = type_obj.handle
+
+		if progress_func:
+			progress_func_obj = ctypes.CFUNCTYPE(
+				ctypes.c_bool, ctypes.c_void_p, ctypes.c_ulonglong, ctypes.c_ulonglong
+			)(lambda ctxt, cur, total: progress_func(cur, total))
+		else:
+			progress_func_obj = ctypes.CFUNCTYPE(
+				ctypes.c_bool, ctypes.c_void_p, ctypes.c_ulonglong, ctypes.c_ulonglong
+			)(lambda ctxt, cur, total: True)
+
+		result_ids = ctypes.POINTER(ctypes.c_char_p)()
+		result_names = ctypes.POINTER(core.BNQualifiedName)()
+
+		result_count = core.BNDefineAnalysisTypes(self.handle, api_types, len(types), progress_func_obj, None, result_ids, result_names)
+
+		try:
+			result = {}
+			for i in range(result_count):
+				id = core.pyNativeStr(result_ids[i])
+				name = _types.QualifiedName._from_core_struct(result_names[i])
+				result[id] = name
+			return result
+		finally:
+			core.BNFreeStringList(result_ids, result_count)
+			core.BNFreeTypeNameList(result_names, result_count)
+
+	def define_user_types(self, types: List[Tuple[Optional['_types.QualifiedNameType'], StringOrType]], progress_func: Optional[ProgressFuncType]):
+		"""
+		``define_user_types`` registers multiple types as though calling :py:func:`define_user_type` multiple times.
+		The difference with this plural version is that it is optimized for adding many types
+		at the same time, using knowledge of all types at add-time to improve runtime.
+		There is an optional ``progress_func`` callback function in case you want updates for a long-running call.
+
+		:param types: List of type names/definitions for the new types. Check :py:func:`define_user_type` for more details.
+		:param progress: Function to call for progress updates
+		"""
+		api_types = (core.BNQualifiedNameAndType * len(types))()
+		for i, (default_name, type_obj) in enumerate(types):
+			if isinstance(type_obj, str):
+				(type_obj, new_name) = self.parse_type_string(type_obj)
+				if default_name is None:
+					default_name = new_name
+			assert default_name is not None, "default_name can only be None if named type is derived from string passed to type_obj"
+			api_types[i].name = _types.QualifiedName(default_name)._to_core_struct()
+			api_types[i].type = type_obj.handle
+
+		if progress_func:
+			progress_func_obj = ctypes.CFUNCTYPE(
+				ctypes.c_bool, ctypes.c_void_p, ctypes.c_ulonglong, ctypes.c_ulonglong
+			)(lambda ctxt, cur, total: progress_func(cur, total))
+		else:
+			progress_func_obj = ctypes.CFUNCTYPE(
+				ctypes.c_bool, ctypes.c_void_p, ctypes.c_ulonglong, ctypes.c_ulonglong
+			)(lambda ctxt, cur, total: True)
+
+		core.BNDefineUserAnalysisTypes(self.handle, api_types, len(types), progress_func_obj, None)
+
 	def undefine_type(self, type_id: str) -> None:
 		"""
 		``undefine_type`` removes a :py:class:`Type` from the global list of types for the current :py:class:`BinaryView`
@@ -7082,6 +7413,42 @@ class BinaryView:
 		if _name is None:
 			raise ValueError("name can only be None if named type is derived from string passed to type_obj")
 		core.BNBinaryViewExportObjectToTypeLibrary(self.handle, lib.handle, _name._to_core_struct(), type_obj.handle)
+
+	def set_manual_type_source_override(self, entries: Mapping['_types.QualifiedName', Tuple['_types.QualifiedName', str]]):
+		"""
+		This allows for fine-grained control over how types from this BinaryView are exported to a TypeLibrary
+		by `export_type_to_library` and `export_object_to_library`. Types identified by the keys of the dict
+		will NOT be exported to the destination TypeLibrary, but will instead be treated as a type that had
+		come from the string component of the value tuple. This results in the destination TypeLibrary gaining
+		a new dependency.
+
+		This is useful if a BinaryView was automatically marked up with a lot of debug information but you
+		want to export only a subset of that information into a new TypeLibrary. By creating a describing
+		which local types correspond to types in other already extant libraries, those types will be avoided
+		during the recursive export.
+
+		This data is not persisted and does not impact analysis.
+
+		BinaryView contains the following types:
+			struct RECT { ... }; // omitted
+			struct ContrivedExample { RECT rect; };
+
+		overrides = {"RECT": ("tagRECT", "winX64common")}
+		bv.set_manual_type_source_override(overrides)
+		bv.export_type_to_library(dest_new_typelib, "ContrivedExample", bv.get_type_by_name("ContrivedExample"))
+
+		Results in dest_new_typelib only having ContrivedExample added, and "RECT" being inserted as a dependency
+		to a the type "tagRECT" found in the typelibrary "winX64common"
+		"""
+		count = len(entries)
+		src_names = (core.BNQualifiedName * count)()
+		dst_names = (core.BNQualifiedName * count)()
+		lib_names = (ctypes.c_char_p * count)()
+		for (i, src, (dst, lib)) in enumerate(entries.items()):
+			src_names[i] = src._to_core_struct()
+			dst_names[i] = dst._to_core_struct()
+			lib_names[i] = lib.encode("utf-8")
+		core.BNBinaryViewSetManualDependencies(self.handle, src_names, dst_names, lib_names, count)
 
 	def record_imported_object_library(
 		self, lib: typelibrary.TypeLibrary, name: str, addr: int, platform: Optional['_platform.Platform'] = None
@@ -7415,6 +7782,11 @@ class BinaryView:
 			raise TypeError("text parameter is not str type")
 		if settings is None:
 			settings = _function.DisassemblySettings()
+			settings.set_option(DisassemblyOption.ShowAddress, False)
+			settings.set_option(DisassemblyOption.ShowOpcode, False)
+			settings.set_option(DisassemblyOption.ShowVariableTypesWhenAssigned, True)
+			settings.set_option(DisassemblyOption.ShowCallParameterNames, True)
+			settings.set_option(DisassemblyOption.WaitForIL, True)
 		if not isinstance(settings, _function.DisassemblySettings):
 			raise TypeError("settings parameter is not DisassemblySettings type")
 		if not isinstance(flags, FindFlag):
@@ -7500,6 +7872,11 @@ class BinaryView:
 			raise TypeError("constant parameter is not integral type")
 		if settings is None:
 			settings = _function.DisassemblySettings()
+			settings.set_option(DisassemblyOption.ShowAddress, False)
+			settings.set_option(DisassemblyOption.ShowOpcode, False)
+			settings.set_option(DisassemblyOption.ShowVariableTypesWhenAssigned, True)
+			settings.set_option(DisassemblyOption.ShowCallParameterNames, True)
+			settings.set_option(DisassemblyOption.WaitForIL, True)
 		if not isinstance(settings, _function.DisassemblySettings):
 			raise TypeError("settings parameter is not DisassemblySettings type")
 

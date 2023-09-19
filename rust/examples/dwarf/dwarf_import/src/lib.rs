@@ -20,23 +20,21 @@ mod types;
 
 use crate::dwarfdebuginfo::DebugInfoBuilder;
 use crate::functions::parse_function_entry;
-use crate::helpers::{get_name, get_uid};
+use crate::helpers::{get_attr_die, get_name, get_uid, DieReference};
 use crate::types::parse_data_variable;
 
 use binaryninja::{
     binaryview::{BinaryView, BinaryViewExt},
     debuginfo::{CustomDebugInfoParser, DebugInfo, DebugInfoParser},
     logger,
+    settings::Settings,
     templatesimplifier::simplify_str_to_str,
 };
 use dwarfreader::{
     create_section_reader, get_endian, is_dwo_dwarf, is_non_dwo_dwarf, is_raw_dwo_dwarf,
 };
 
-use gimli::{
-    constants, AttributeValue::UnitRef, DebuggingInformationEntry, Dwarf, DwarfFileType, Reader,
-    Unit,
-};
+use gimli::{constants, DebuggingInformationEntry, Dwarf, DwarfFileType, Reader, SectionId, Unit};
 
 use log::LevelFilter;
 use std::ffi::CString;
@@ -44,9 +42,11 @@ use std::ffi::CString;
 fn recover_names<R: Reader<Offset = usize>>(
     dwarf: &Dwarf<R>,
     debug_info_builder: &mut DebugInfoBuilder,
-) {
+    progress: &dyn Fn(usize, usize) -> Result<(), ()>,
+) -> usize {
+    let mut total_die_count = 0;
     let mut iter = dwarf.units();
-    while let Some(header) = iter.next().unwrap() {
+    while let Ok(Some(header)) = iter.next() {
         let unit = dwarf.unit(header).unwrap();
         let mut namespace_qualifiers: Vec<(isize, CString)> = vec![];
         let mut entries = unit.entries();
@@ -55,9 +55,16 @@ fn recover_names<R: Reader<Offset = usize>>(
         // The first entry in the unit is the header for the unit
         if let Ok(Some((delta_depth, _))) = entries.next_dfs() {
             depth += delta_depth;
+            total_die_count += 1;
         }
 
         while let Ok(Some((delta_depth, entry))) = entries.next_dfs() {
+            total_die_count += 1;
+
+            if (*progress)(0, total_die_count).is_err() {
+                return 0; // Parsing canceled
+            };
+
             depth += delta_depth;
             assert!(depth >= 0);
 
@@ -75,16 +82,27 @@ fn recover_names<R: Reader<Offset = usize>>(
                     ) {
                         if let Some(namespace_qualifier) = get_name(dwarf, unit, entry) {
                             namespace_qualifiers.push((depth, namespace_qualifier));
-                        } else if let Ok(Some(UnitRef(offset))) =
-                            entry.attr_value(constants::DW_AT_extension)
+                        } else if let Some(die_reference) =
+                            get_attr_die(dwarf, unit, entry, constants::DW_AT_extension)
                         {
-                            resolve_namespace_name(
-                                dwarf,
-                                unit,
-                                &unit.entry(offset).unwrap(),
-                                namespace_qualifiers,
-                                depth,
-                            );
+                            match die_reference {
+                                DieReference::Offset(entry_offset) => resolve_namespace_name(
+                                    dwarf,
+                                    unit,
+                                    &unit.entry(entry_offset).unwrap(),
+                                    namespace_qualifiers,
+                                    depth,
+                                ),
+                                DieReference::UnitAndOffset((entry_unit, entry_offset)) => {
+                                    resolve_namespace_name(
+                                        dwarf,
+                                        &entry_unit,
+                                        &entry_unit.entry(entry_offset).unwrap(),
+                                        namespace_qualifiers,
+                                        depth,
+                                    )
+                                }
+                            }
                         } else {
                             namespace_qualifiers
                                 .push((depth, CString::new("anonymous_namespace").unwrap()));
@@ -93,31 +111,22 @@ fn recover_names<R: Reader<Offset = usize>>(
 
                     resolve_namespace_name(dwarf, &unit, entry, &mut namespace_qualifiers, depth);
                 }
-                constants::DW_TAG_class_type => {
-                    let class_name = get_name(dwarf, &unit, entry).unwrap();
-                    namespace_qualifiers.push((depth, class_name));
-
-                    debug_info_builder.set_name(
-                        get_uid(&unit, entry),
-                        CString::new(
-                            simplify_str_to_str(
-                                namespace_qualifiers
-                                    .iter()
-                                    .map(|(_, namespace)| namespace.to_string_lossy().to_string())
-                                    .collect::<Vec<String>>()
-                                    .join("::"),
-                            )
-                            .as_str(),
-                        )
-                        .unwrap(),
-                    );
-                }
-                constants::DW_TAG_structure_type => {
+                constants::DW_TAG_class_type
+                | constants::DW_TAG_structure_type
+                | constants::DW_TAG_union_type => {
                     if let Some(name) = get_name(dwarf, &unit, entry) {
                         namespace_qualifiers.push((depth, name))
                     } else {
-                        namespace_qualifiers
-                            .push((depth, CString::new("anonymous_structure").unwrap()))
+                        namespace_qualifiers.push((
+                            depth,
+                            CString::new(match entry.tag() {
+                                constants::DW_TAG_class_type => "anonymous_class",
+                                constants::DW_TAG_structure_type => "anonymous_structure",
+                                constants::DW_TAG_union_type => "anonymous_union",
+                                _ => unreachable!(),
+                            })
+                            .unwrap(),
+                        ))
                     }
                     debug_info_builder.set_name(
                         get_uid(&unit, entry),
@@ -134,7 +143,9 @@ fn recover_names<R: Reader<Offset = usize>>(
                         .unwrap(),
                     );
                 }
-                _ => {
+                constants::DW_TAG_typedef
+                | constants::DW_TAG_subprogram
+                | constants::DW_TAG_enumeration_type => {
                     if let Some(name) = get_name(dwarf, &unit, entry) {
                         debug_info_builder.set_name(
                             get_uid(&unit, entry),
@@ -155,21 +166,36 @@ fn recover_names<R: Reader<Offset = usize>>(
                         );
                     }
                 }
+                _ => {
+                    if let Some(name) = get_name(dwarf, &unit, entry) {
+                        debug_info_builder.set_name(get_uid(&unit, entry), name);
+                    }
+                }
             }
         }
     }
+
+    total_die_count
 }
 
 fn parse_unit<R: Reader<Offset = usize>>(
     dwarf: &Dwarf<R>,
     unit: &Unit<R>,
     debug_info_builder: &mut DebugInfoBuilder,
+    progress: &dyn Fn(usize, usize) -> Result<(), ()>,
+    current_die_number: &mut usize,
+    total_die_count: usize,
 ) {
     let mut entries = unit.entries();
 
     // Really all we care about as we iterate the entries in a given unit is how they modify state (our perception of the file)
     // There's a lot of junk we don't care about in DWARF info, so we choose a couple DIEs and mutate state (add functions (which adds the types it uses) and keep track of what namespace we're in)
     while let Ok(Some((_, entry))) = entries.next_dfs() {
+        *current_die_number += 1;
+        if (*progress)(*current_die_number, total_die_count).is_err() {
+            return; // Parsing canceled
+        }
+
         match entry.tag() {
             constants::DW_TAG_subprogram => {
                 parse_function_entry(dwarf, unit, entry, debug_info_builder)
@@ -182,7 +208,10 @@ fn parse_unit<R: Reader<Offset = usize>>(
     }
 }
 
-fn parse_dwarf(view: &BinaryView) -> DebugInfoBuilder {
+fn parse_dwarf(
+    view: &BinaryView,
+    progress: Box<dyn Fn(usize, usize) -> Result<(), ()>>,
+) -> DebugInfoBuilder {
     // Determine if this is a DWO
     // TODO : Make this more robust...some DWOs follow non-DWO conventions
     let dwo_file = is_dwo_dwarf(view) || is_raw_dwo_dwarf(view);
@@ -197,8 +226,9 @@ fn parse_dwarf(view: &BinaryView) -> DebugInfoBuilder {
 
     // gimli setup
     let endian = get_endian(view);
-    let section_reader = create_section_reader(view, endian, dwo_file);
-    let mut dwarf = Dwarf::load(&section_reader).unwrap();
+    let mut section_reader =
+        |section_id: SectionId| -> _ { create_section_reader(section_id, view, endian, dwo_file) };
+    let mut dwarf = Dwarf::load(&mut section_reader).unwrap();
     if dwo_file {
         dwarf.file_type = DwarfFileType::Dwo;
     }
@@ -207,16 +237,26 @@ fn parse_dwarf(view: &BinaryView) -> DebugInfoBuilder {
     //  Since DWARF is stored as a tree with arbitrary implicit edges among leaves,
     //   it is not possible to correctly track namespaces while you're parsing "in order" without backtracking,
     //   so we just do it up front
-    let mut debug_info_builder = DebugInfoBuilder::new();
-    recover_names(&dwarf, &mut debug_info_builder);
+    let mut debug_info_builder = DebugInfoBuilder::new(view);
+    if (*progress)(0, 1).is_err() {
+        return debug_info_builder; // Parsing canceled
+    };
+    let total_die_count = recover_names(&dwarf, &mut debug_info_builder, &progress);
+    if total_die_count == 0 {
+        return debug_info_builder;
+    }
 
     // Parse all the compilation units
     let mut iter = dwarf.units();
-    while let Some(header) = iter.next().unwrap() {
+    let mut current_die_number = 0;
+    while let Ok(Some(header)) = iter.next() {
         parse_unit(
             &dwarf,
             &dwarf.unit(header).unwrap(),
             &mut debug_info_builder,
+            &progress,
+            &mut current_die_number,
+            total_die_count,
         );
     }
 
@@ -227,7 +267,8 @@ struct DWARFParser;
 
 impl CustomDebugInfoParser for DWARFParser {
     fn is_valid(&self, view: &BinaryView) -> bool {
-        dwarfreader::is_valid(view)
+        Settings::new("").get_bool("corePlugins.dwarfImport", None, None)
+            && dwarfreader::is_valid(view)
     }
 
     fn parse_info(
@@ -235,11 +276,15 @@ impl CustomDebugInfoParser for DWARFParser {
         debug_info: &mut DebugInfo,
         _: &BinaryView,
         debug_file: &BinaryView,
-        _: Box<dyn Fn(usize, usize) -> Result<(), ()>>,
+        progress: Box<dyn Fn(usize, usize) -> Result<(), ()>>,
     ) -> bool {
-        // Parse dwarf info in raw view or from a separate file
-        parse_dwarf(debug_file).commit_info(debug_info);
-        true
+        if Settings::new("").get_bool("corePlugins.dwarfImport", None, None) {
+            // Parse dwarf info in raw view or from a separate file
+            parse_dwarf(debug_file, progress).commit_info(debug_info);
+            true
+        } else {
+            false
+        }
     }
 }
 

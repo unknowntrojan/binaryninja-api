@@ -21,6 +21,8 @@ use binaryninjacore_sys::*;
 
 pub use binaryninjacore_sys::BNModificationStatus as ModificationStatus;
 
+use std::collections::HashMap;
+use std::ffi::c_void;
 use std::ops;
 use std::ops::Range;
 use std::os::raw::c_char;
@@ -140,6 +142,19 @@ pub trait BinaryViewBase: AsRef<BinaryView> {
             .map(|bv| bv.save())
             .unwrap_or(false)
     }
+}
+
+// TODO: Copied from debuginfo.rs, this should be consolidated
+struct ProgressContext(Option<Box<dyn Fn(usize, usize) -> Result<()>>>);
+
+extern "C" fn cb_progress(ctxt: *mut c_void, cur: usize, max: usize) -> bool {
+    ffi_wrap!("BinaryViewExt::cb_progress", unsafe {
+        let progress = ctxt as *mut ProgressContext;
+        match &(*progress).0 {
+            Some(func) => (func)(cur, max).is_ok(),
+            None => true,
+        }
+    })
 }
 
 pub trait BinaryViewExt: BinaryViewBase {
@@ -476,10 +491,22 @@ pub trait BinaryViewExt: BinaryViewBase {
         }
     }
 
+    fn define_auto_data_var(&self, dv: DataVariable) {
+        unsafe {
+            BNDefineDataVariable(self.as_ref().handle, dv.address, &mut dv.t.into());
+        }
+    }
+
     /// You likely would also like to call [`Self::define_user_symbol`] to bind this data variable with a name
     fn define_user_data_var(&self, dv: DataVariable) {
         unsafe {
             BNDefineUserDataVariable(self.as_ref().handle, dv.address, &mut dv.t.into());
+        }
+    }
+
+    fn undefine_auto_data_var(&self, addr: u64) {
+        unsafe {
+            BNUndefineDataVariable(self.as_ref().handle, addr);
         }
     }
 
@@ -489,11 +516,129 @@ pub trait BinaryViewExt: BinaryViewBase {
         }
     }
 
+    fn define_auto_type<S: BnStrCompatible>(
+        &self,
+        name: S,
+        source: S,
+        type_obj: &Type,
+    ) -> QualifiedName {
+        let mut qualified_name = QualifiedName::from(name);
+        let source_str = source.into_bytes_with_nul();
+        let name_handle = unsafe {
+            let id_str = BNGenerateAutoTypeId(
+                source_str.as_ref().as_ptr() as *const _,
+                &mut qualified_name.0,
+            );
+            BNDefineAnalysisType(
+                self.as_ref().handle,
+                id_str,
+                &mut qualified_name.0,
+                type_obj.handle,
+            )
+        };
+        QualifiedName(name_handle)
+    }
+
     fn define_user_type<S: BnStrCompatible>(&self, name: S, type_obj: &Type) {
+        let mut qualified_name = QualifiedName::from(name);
         unsafe {
-            let mut qualified_name = QualifiedName::from(name);
             BNDefineUserAnalysisType(self.as_ref().handle, &mut qualified_name.0, type_obj.handle)
         }
+    }
+
+    fn define_auto_types<S: BnStrCompatible>(
+        &self,
+        names_sources_and_types: Vec<(S, S, &Type)>,
+        progress: Option<Box<dyn Fn(usize, usize) -> Result<()>>>,
+    ) -> HashMap<String, QualifiedName> {
+        let mut names = vec![];
+        let mut ids = vec![];
+        let mut types = vec![];
+        let mut api_types =
+            Vec::<BNQualifiedNameTypeAndId>::with_capacity(names_sources_and_types.len());
+        for (name, source, type_obj) in names_sources_and_types.into_iter() {
+            names.push(QualifiedName::from(name));
+            ids.push(source.into_bytes_with_nul());
+            types.push(type_obj);
+        }
+
+        for ((name, source), type_obj) in names.iter().zip(ids.iter()).zip(types.iter()) {
+            api_types.push(BNQualifiedNameTypeAndId {
+                name: name.0,
+                id: source.as_ref().as_ptr() as *mut _,
+                type_: type_obj.handle,
+            });
+        }
+
+        let mut progress_raw = ProgressContext(progress);
+        let mut result_ids: *mut *mut c_char = ptr::null_mut();
+        let mut result_names: *mut BNQualifiedName = ptr::null_mut();
+        let result_count = unsafe {
+            BNDefineAnalysisTypes(
+                self.as_ref().handle,
+                api_types.as_mut_ptr(),
+                api_types.len(),
+                Some(cb_progress),
+                &mut progress_raw as *mut _ as *mut c_void,
+                &mut result_ids as *mut _,
+                &mut result_names as *mut _,
+            )
+        };
+
+        let mut result = HashMap::with_capacity(result_count);
+
+        let id_array = unsafe { Array::<BnString>::new(result_ids, result_count, ()) };
+        let name_array = unsafe { Array::<QualifiedName>::new(result_names, result_count, ()) };
+
+        for (id, name) in id_array.iter().zip(name_array.iter()) {
+            result.insert(id.as_str().to_owned(), name.clone());
+        }
+
+        result
+    }
+
+    fn define_user_types<S: BnStrCompatible>(
+        &self,
+        names_and_types: Vec<(S, &Type)>,
+        progress: Option<Box<dyn Fn(usize, usize) -> Result<()>>>,
+    ) {
+        let mut names = vec![];
+        let mut types = vec![];
+        let mut api_types = Vec::<BNQualifiedNameAndType>::with_capacity(names_and_types.len());
+        for (name, type_obj) in names_and_types.into_iter() {
+            names.push(QualifiedName::from(name));
+            types.push(type_obj);
+        }
+
+        for (name, type_obj) in names.iter().zip(types.iter()) {
+            api_types.push(BNQualifiedNameAndType {
+                name: name.0,
+                type_: type_obj.handle,
+            });
+        }
+
+        let mut progress_raw = ProgressContext(progress);
+        unsafe {
+            BNDefineUserAnalysisTypes(
+                self.as_ref().handle,
+                api_types.as_mut_ptr(),
+                api_types.len(),
+                Some(cb_progress),
+                &mut progress_raw as *mut _ as *mut c_void,
+            )
+        };
+    }
+
+    fn undefine_auto_type<S: BnStrCompatible>(&self, id: S) {
+        let id_str = id.into_bytes_with_nul();
+        unsafe {
+            BNUndefineAnalysisType(self.as_ref().handle, id_str.as_ref().as_ptr() as *const _);
+        }
+    }
+
+    fn undefine_user_type<S: BnStrCompatible>(&self, name: S) {
+        let mut qualified_name = QualifiedName::from(name);
+        unsafe { BNUndefineUserAnalysisType(self.as_ref().handle, &mut qualified_name.0) }
     }
 
     fn types(&self) -> Array<QualifiedNameAndType> {
@@ -708,9 +853,15 @@ pub trait BinaryViewExt: BinaryViewBase {
         }
     }
 
-    fn create_user_function(&self, plat: &Platform, addr: u64) {
+    fn create_user_function(&self, plat: &Platform, addr: u64) -> Result<Ref<Function>> {
         unsafe {
-            BNCreateUserFunction(self.as_ref().handle, plat.handle, addr);
+            let func = BNCreateUserFunction(self.as_ref().handle, plat.handle, addr);
+
+            if func.is_null() {
+                return Err(());
+            }
+
+            Ok(Function::from_raw(func))
         }
     }
 

@@ -39,10 +39,14 @@ fn get_parameters<R: Reader<Offset = usize>>(
         while let Some(child) = children.next().unwrap() {
             match child.entry().tag() {
                 constants::DW_TAG_formal_parameter => {
-                    let name = get_name(dwarf, unit, child.entry());
+                    let name = debug_info_builder.get_name(dwarf, unit, child.entry());
                     let type_ = get_type(dwarf, unit, child.entry(), debug_info_builder);
-                    if let (Some(parameter_name), Some(parameter_type)) = (name, type_) {
-                        result.push(Some((parameter_name, parameter_type)));
+                    if let Some(parameter_name) = name {
+                        if let Some(parameter_type) = type_ {
+                            result.push(Some((parameter_name, parameter_type)));
+                        } else {
+                            result.push(Some((parameter_name, 0)))
+                        }
                     } else {
                         result.push(None)
                     }
@@ -64,7 +68,7 @@ pub fn parse_function_entry<R: Reader<Offset = usize>>(
     // TODO : Handle OOT, stubs/trampolines
 
     // Collect function properties (if they exist in this DIE)
-    let full_name = debug_info_builder.get_name(unit, entry);
+    let full_name = debug_info_builder.get_name(dwarf, unit, entry);
     let raw_name = get_raw_name(dwarf, unit, entry);
     let return_type = get_type(dwarf, unit, entry, debug_info_builder);
     let address = get_start_address(dwarf, unit, entry);
