@@ -3004,17 +3004,17 @@ namespace BinaryNinja {
 		/*!
 			Symbols are defined as one of the following types:
 
-				=========================== ==============================================================
+				=========================== =================================================================
 				BNSymbolType                Description
-				=========================== ==============================================================
+				=========================== =================================================================
 				FunctionSymbol              Symbol for function that exists in the current binary
 				ImportAddressSymbol         Symbol defined in the Import Address Table
 				ImportedFunctionSymbol      Symbol for a function that is not defined in the current binary
 				DataSymbol                  Symbol for data in the current binary
 				ImportedDataSymbol          Symbol for data that is not defined in the current binary
 				ExternalSymbol              Symbols for data and code that reside outside the BinaryView
-				LibraryFunctionSymbol       Symbols for external functions outside the library
-				=========================== ==============================================================
+				LibraryFunctionSymbol       Symbols for functions identified as belonging to a shared library
+				=========================== =================================================================
 
 		    \return Symbol type
 		*/
@@ -3416,6 +3416,7 @@ namespace BinaryNinja {
 		std::string GetType() const;
 		uint64_t GetStart() const;
 		uint64_t GetLength() const;
+		uint64_t GetEnd() const;
 		uint64_t GetInfoData() const;
 		uint64_t GetAlignment() const;
 		uint64_t GetEntrySize() const;

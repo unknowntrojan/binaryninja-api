@@ -22,22 +22,23 @@ Simply select an appropriate token (variable or memory address), and press `y` t
 
 ![Changing a type](../img/change-type.png "Changing a type")
 
-### Types View
+## Types View
 
 To see all types in a Binary View, use the types view. It can be accessed from the menu `View > Types`. Alternatively, you can access it with the `t` hotkey from most other views, or using `[CMD/CTRL] p` to access the command-palette and typing "types". This is the most common interface for creating structures, unions and types using C-style syntax.
+
+The types view is also available in the sidebar with the `{…}` icon.
 
 For many built-in file formats you'll notice that common headers are already enumerated in the types view. These headers are applied when viewing the binary in [linear view](./index.md#linear-view) and will show the parsed binary data into that structure or type making them particularly useful for binary parsing even of non-executable file formats.
 
 ![Types View](../img/types-view.png "Types View")
 
-
-#### Structure Access Annotations
+### Structure Access Annotations
 
 Types view now annotates code references to structure offsets. It uses the same convention as in the graph/linear view. For example, the `__offset(0x8).q` token means the code references the offset 0x8 of this structure, and the size of the access is a qword. This will make it easier to see which offsets of a structure are being used, and aid in the process of creating structure members.
 
 ![Type View Accesses](../img/type-view-accesses.png "Type View Accesses")
 
-#### Shortcuts
+### Shortcuts
 
 From within the Types view, you can use the following hotkeys to create new types, structures, or unions. Alternatively, you can use the right-click menu to access these options and more.
 
@@ -58,7 +59,7 @@ The shortcuts for editing existing elements are:
 * `l` - Set structure size
 * `u` - undefine field
 
-#### Attributes
+### Attributes
 
 Structs support the attribute `__packed` to indicate that there is no padding. Additionally, function prototypes support the following keywords to indicate their calling convention or other features:
 
@@ -77,7 +78,7 @@ __convention("customconvention")
 ```
 
 
-##### Examples
+#### Examples
 
 ``` C
 enum _flags
@@ -190,88 +191,6 @@ In linear view, if the selection is a single byte outside any function, it will 
 
 This also works within data variables with structure type. For example, if the selection is a range of bytes within a structure, a new structure will be created within the existing structure.
 
-
-### Types View
-
-To see all types in a Binary View, use the types view. It can be accessed from the menu `View > Types`. Alternatively, you can access it with the `t` hotkey from most other views, or using `[CMD/CTRL] p` to access the command-palette and typing "types". This is the most common interface for creating structures, unions and types using C-style syntax.
-
-For many built-in file formats you'll notice that common headers are already enumerated in the types view. These headers are applied when viewing the binary in [linear view](./#linear-view) and will show the parsed binary data into that structure or type making them particularly useful for binary parsing even of non-executable file formats.
-
-![Types View](../img/types-view.png "Types View")
-
-#### Shortcuts and Attributes
-
-From within the Types view, you can use the following hotkeys to create new types, structures, or unions. Alternatively, you can use the right-click menu to access these options and more.
-
-![Types Right Click Menu >](../img/types-right-click-menu.png "Types Right Click Menu")
-
-* `s` - Create new structure
-* `i` - Create new type
-* `[SHIFT] s` - Creating a new union
-* `1`, `2`, `4`, `8`: The number hotkeys will create a create an integer of the specified size. This additionally works on selections.
-* `d`: If you want to cycle through the different integer sizes, repeatedly pressing `d` has the same effect as pressing the numbers in order.
-* `-`: To quickly toggle integers between signed and unsigned integers, you can use the `-` hotkey.
-
-
-The shortcuts for editing existing elements are:
-
-* `y` - Edit type / field
-* `n` - Rename type / field
-* `l` - Set structure size
-* `u` - undefine field
-
-Structs support the attribute `__packed` to indicate that there is no padding. Additionally, function prototypes support the following keywords to indicate their calling convention or other features:
-
-``` text
-__cdecl
-__stdcall
-__fastcall
-__convention
-__noreturn
-```
-
-To use the `__convention` keyword, pass in the convention name as a parameter argument:
-
-```
-__convention("customconvention")
-```
-
-
-#### Structure Access Annotations
-
-Types view now annotates code references to structure offsets. It uses the same convention as in the graph/linear view. For example, the `__offset(0x8).q` token means the code references the offset 0x8 of this structure, and the size of the access is a qword. This will make it easier to see which offsets of a structure are being used, and aid in the process of creating structure members.
-
-![Type View Accesses](../img/type-view-accesses.png "Type View Accesses")
-
-
-#### Applying Structures and Types
-
-![Changing a type](../img/change-type.png "Changing a type")
-
-Once you've created your structures, you can apply them to your disassembly. Simply select an appropriate token (variable or memory address), and press `y` to bring up the change type dialog. Types can be applied on both disassembly and all levels of IL. Any variables that are shared between the ILs will be updated as types are applied.
-
-
-#### Examples
-
-``` C
-enum _flags
-{
-    F_X = 0x1,
-    F_W = 0x2,
-    F_R = 0x4
-};
-```
-
-``` C
-struct Header __packed
-{
-    char *name;
-    uint32_t version;
-    void (* callback)();
-    uint16_t size;
-    enum _flags flags;
-};
-```
 
 ### Import BNDB File
 
@@ -401,3 +320,44 @@ If you are analyzing a target that is for a different operating system, you need
 ### Export Header File
 
 If you want to compile code using the structures you defined during your analysis, you can export all the types to a C-compatible header file that can be used via `#include` by a C compiler. You can also import this header in another analysis session via [Import Header File](#import-header-file), just be sure to enable `Define Binary Ninja Macros` when doing so.
+
+## Platform Types
+
+Binary Ninja pulls type information from a variety of sources. The highest-level source are the platform types loaded for the given platform (which includes operating system and architecture). There are two sources of platform types. The first are shipped with the product in a [binary path](./index.md#directories). The second location is in your [user folder](./index.md#user-folder) and is intended for you to put custom platform types.
+
+???+ Danger "Warning"
+    Do NOT make changes to platform types in the binary path as they will be overwritten any time Binary Ninja updates. 
+
+Platform types are used to define types that should be available to all programs available on that particular platform. They are only for global common types. Consider, for example, that you might want to add the following on windows:
+
+```
+typedef uint8_t u8;
+```
+
+You could write this type into:
+
+```
+/home/user/.binaryninja/types/platform/windows-x86.c
+```
+
+And any time you opened a 32bit windows binary, that type would be available to use. However, please note that these are not substitutes for [Type Libraries](../dev/annotation.md#type-libraries).  Type Libraries are used to provide a collection of types for a given library such as a libc, or common DLL. 
+
+???+ Warning "Tip"
+   If you don't know the specific platform (and thus filename) you need to create for a given file, just enter `bv.platform` in the scripting console.
+
+### Common Types
+
+You may wish to provide types that are common across multiple architectures or platforms. The easiest way to do this is to use a `#include "filename.c"` line in the specific platform so that any common types will be loaded.
+
+For example, something like:
+
+```
+$ pwd
+/home/user/.binaryninja/types/platform
+$ cat windows-x86.c
+#include "windows.c"
+$ cat windows-x86_64.c
+#include "windows.c"
+$ cat windows.c
+typedef uint8_t u8;
+```

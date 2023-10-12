@@ -901,7 +901,10 @@ extern "C"
 		ILPreventDeadStoreElimination = 2,
 
 		// Assumes that a variable assignment might be used in some way during MLIL translation
-		MLILAssumePossibleUse = 4
+		MLILAssumePossibleUse = 4,
+
+		// lifted instruction uses pointer authentication
+		SrcInstructionUsesPointerAuth = 8
 	} BNILInstructionAttribute;
 
 	typedef struct BNLowLevelILInstruction

@@ -168,16 +168,17 @@ class BINARYNINJAUIAPI SettingsEditor : public QWidget
 	bool m_requiresRestart = false;
 	bool m_settingModified = false;
 
+	int m_minHeight;
+	int m_maxAdjustedWidth;
+
   public:
 	SettingsEditor(
 	    QWidget* parent, SettingsRef settings, BinaryViewRef view, BNSettingsScope scope, const Json::Value* setting);
 	~SettingsEditor();
 
-	QSize sizeHint() const override;
 	void setSetting(const Json::Value* value, bool updateSchema = false);
 
   Q_SIGNALS:
-	void geometryChanged();
 	void settingChanged();
 	void allSettingsChanged();
 	void showIdentifiers(bool enable);
@@ -211,6 +212,7 @@ class BINARYNINJAUIAPI SettingsEditor : public QWidget
   public Q_SLOTS:
 	void updateScope(BinaryViewRef, BNSettingsScope);
 	void updateSize();
+	void notifyGeometryChanged();
 	void updateViewMode(bool enabled);
 
   private:
@@ -238,19 +240,25 @@ class BINARYNINJAUIAPI SettingsDelegate : public QStyledItemDelegate
 	QFont m_groupFont;
 	QFont m_subgroupFont;
 	QFont m_monoFont;
+	int m_groupHeight;
+	int m_subgroupHeight;
 	int m_monoFontHeight;
 	QTimer* m_updateModelTimer;
+	QTimer* m_resizeTimer;
+	QSize m_lastViewportSize;
 
 	QTreeView* m_treeView;
 	std::function<void(const QModelIndex& index)> m_hoverAction = nullptr;
-	std::function<void()> m_defaultSelectionAction = nullptr;
+	std::function<void(const QString&, const QString&)> m_defaultSelectionAction = nullptr;
+	QString m_defaultGroupSelection;
+	QString m_defaultSubgroupSelection;
 
   public:
 	SettingsDelegate(QWidget* parent, SettingsRef settings, SettingsFilterProxyModel* filterModel,
 	    const std::function<void(const QModelIndex& index)>& hoverAction = nullptr);
 	~SettingsDelegate();
 
-	void setDefaultSelection(const std::function<void()>& selectionAction);
+	void setDefaultSelection(const QString& group, const QString& subgroup, const std::function<void(const QString&, const QString&)>& selectionAction);
 
 	void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
 
@@ -260,9 +268,6 @@ class BINARYNINJAUIAPI SettingsDelegate : public QStyledItemDelegate
 	void setEditorData(QWidget* editor, const QModelIndex& index) const override;
 	void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override;
 	void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-
-  protected:
-	bool eventFilter(QObject* object, QEvent* event) override;
 
   public:
   Q_SIGNALS:
@@ -275,15 +280,15 @@ class BINARYNINJAUIAPI SettingsDelegate : public QStyledItemDelegate
 	void performHoverAction(QModelIndex index) const;
 
   public Q_SLOTS:
+	void notifyUpdateModel();
 	void updateFonts();
 	void updateModel();
 	void updateScope(BinaryViewRef, BNSettingsScope);
-	void updateSize();
+	void notifyResizeEvent();
 	void updateViewMode(bool enabled) const;
 
   private Q_SLOTS:
 	void commitEditorData();
-	void editorGeometryChanged();
 };
 
 
@@ -297,6 +302,8 @@ class BINARYNINJAUIAPI SettingsTreeView : public QTreeView
   public:
 	explicit SettingsTreeView(QWidget* parent);
 	~SettingsTreeView();
+
+	void updateTheme();
 
   protected:
 	virtual void resizeEvent(QResizeEvent* event) override;
@@ -327,6 +334,7 @@ class BINARYNINJAUIAPI BinaryViewScopeLabel : public MenuHelper
 	BinaryViewScopeLabel(QWidget* parent, const QString& name = "", BNSettingsScope scope = SettingsAutoScope);
 
 	void refresh();
+	void setSelection(BinaryViewRef view, BNSettingsScope scope);
 	const QString& currentSelection() { return m_curName; }
 	BinaryViewRef currentBinaryView() { return m_curView; }
 
@@ -359,6 +367,7 @@ class BINARYNINJAUIAPI SettingsScopeBar : public QWidget
 	SettingsScopeBar(QWidget* parent = nullptr);
 
 	void refresh();
+	void setResource(BinaryViewRef view);
 	void updateTheme();
 
   Q_SIGNALS:
@@ -414,6 +423,7 @@ class BINARYNINJAUIAPI SettingsView : public QWidget
 	QCheckBox* m_viewMode = nullptr;
 	SearchFilter* m_search = nullptr;
 	bool m_outlineNavEnabled = true;
+	int m_nextGroupIdx = 0;
 
   public:
 	SettingsView(QWidget* parent);
@@ -422,11 +432,12 @@ class BINARYNINJAUIAPI SettingsView : public QWidget
 
 	SettingsRef getSettings() { return m_settings; }
 
+	void openPersistentEditors(int numToOpen = 0, bool update = true);
 	void init(std::string schema, bool uiScopeSelection);
 	void refreshAllSettings();
 	void refreshCurrentScope();
 	void setData(BinaryViewRef view, const QString& name = "");
-	void setDefaultGroupSelection(const QString& group);
+	void setDefaultGroupSelection(const QString& group, const QString& subgroup = "");
 	void focusSearch();
 	void setSearchFilter(const QString& filter) { if (m_search) m_search->setText(filter); };
 

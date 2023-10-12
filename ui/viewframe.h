@@ -27,7 +27,7 @@
 
 	\ingroup viewframe
 */
-struct SelectionInfoForXref
+struct BINARYNINJAUIAPI SelectionInfoForXref
 {
 	// Check these booleans before accessing the address/type/variable info,
 	// since the invalid fields are not guaranteed to be initialized/zero-ed.
@@ -285,7 +285,7 @@ class BINARYNINJAUIAPI ViewLocation
 	QString m_viewType;
 	FunctionRef m_function = nullptr;
 	uint64_t m_offset = 0;
-	BNFunctionGraphType m_ilViewType = NormalFunctionGraph;
+	BNFunctionGraphType m_ilViewType = InvalidILViewType;
 	size_t m_instrIndex = BN_INVALID_EXPR;
 
   public:

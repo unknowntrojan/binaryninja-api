@@ -41,12 +41,12 @@ Valid symbol types [include](https://api.binary.ninja/binaryninja.enums.SymbolTy
 | DataSymbol |                Symbol for data in the current binary |
 | ImportedDataSymbol |        Symbol for data that is not defined in the current binary |
 | ExternalSymbol |            Symbols for data and code that reside outside the BinaryView |
-| LibraryFunctionSymbol |     Symbols for external functions outside the library |
+| LibraryFunctionSymbol |     Symbols for functions identified as belonging to a shared library |
 
 
 ## Tags
 
-The tags API has been reworked in 3.4 to be easier to use an understand.
+The tags API has been reworked in 3.4 to be easier to use and understand.
 
 ### TagTypes
 
@@ -88,7 +88,7 @@ Function tags are tags you create on a [Function](https://api.binary.ninja/binar
 >>> current_function.add_tag("Cheese", "This function smells funny")
 ```
 
-If you include an address when you call `Function.add_tag`, you'll create an address tag. These are good for labeling specific instructions. 
+If you include an address when you call `Function.add_tag`, you'll create an address tag. These are good for labeling specific instructions.
 
 ```py
 >>> current_function.add_tag("Bug", "This is comparing an unsigned number with a signed number!", 0xdeadbeef)
