@@ -21,6 +21,10 @@ class BINARYNINJAUIAPI CustomFusionStyle : public QProxyStyle
 	    StandardPixmap standardIcon, const QStyleOption* option, const QWidget* widget) const override;
 	virtual QPixmap standardPixmap(
 	    StandardPixmap standardPixmap, const QStyleOption* option, const QWidget* widget) const override;
+	virtual QRect subElementRect(
+	    QStyle::SubElement element, const QStyleOption *option, const QWidget *widget) const override;
+	virtual void drawPrimitive(
+	    PrimitiveElement elem, const QStyleOption *option, QPainter *painter, const QWidget *widget) const override;
 };
 
 
@@ -44,6 +48,9 @@ void BINARYNINJAUIAPI addJsonTheme(const char* json);
 
 QColor BINARYNINJAUIAPI getThemeColor(BNThemeColor color);
 QColor BINARYNINJAUIAPI getTokenColor(QWidget* widget, BNInstructionTextTokenType token);
+QColor BINARYNINJAUIAPI getTypeClassColor(const QWidget* widget, BNTypeClass typeClass);
+std::optional<QColor> BINARYNINJAUIAPI getSymbolColor(SymbolRef symbol);
+std::optional<QColor> BINARYNINJAUIAPI getSymbolColor(BNSymbolType type, BNSymbolBinding binding);
 
 QColor BINARYNINJAUIAPI avgColor(QColor a, QColor b);
 QColor BINARYNINJAUIAPI mixColor(QColor a, QColor b, uint8_t mix);

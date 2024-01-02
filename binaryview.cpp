@@ -769,6 +769,13 @@ std::vector<Ref<Tag>> Tag::ConvertTagList(BNTag** tags, size_t count)
 }
 
 
+void Tag::FreeTagList(BNTag** tags, size_t count)
+{
+	delete[] tags;
+	(void)count;
+}
+
+
 std::vector<Ref<Tag>> Tag::ConvertAndFreeTagList(BNTag** tags, size_t count)
 {
 	auto result = ConvertTagList(tags, count);
@@ -856,6 +863,13 @@ std::vector<TagReference> TagReference::ConvertTagReferenceList(BNTagReference* 
 		result.emplace_back(tags[i]);
 	}
 	return result;
+}
+
+
+void TagReference::FreeTagReferenceList(BNTagReference* tags, size_t count)
+{
+	delete[] tags;
+	(void)count;
 }
 
 
@@ -2491,6 +2505,108 @@ std::vector<Confidence<Ref<Type>>> BinaryView::GetTypesReferenced(const Qualifie
 }
 
 
+unordered_set<QualifiedName> BinaryView::GetOutgoingDirectTypeReferences(const QualifiedName& type)
+{
+	size_t count;
+	BNQualifiedName apiType = type.GetAPIObject();
+	BNQualifiedName* apiResult = BNGetOutgoingDirectTypeReferences(m_object, &apiType, &count);
+	QualifiedName::FreeAPIObject(&apiType);
+	if (!apiResult)
+		return {};
+
+	unordered_set<QualifiedName> result;
+	for (size_t i = 0; i < count; i ++)
+	{
+		result.insert(QualifiedName::FromAPIObject(&apiResult[i]));
+	}
+	BNFreeTypeNameList(apiResult, count);
+	return result;
+}
+
+
+unordered_set<QualifiedName> BinaryView::GetOutgoingRecursiveTypeReferences(const QualifiedName& type)
+{
+	return GetOutgoingRecursiveTypeReferences(unordered_set<QualifiedName>{type});
+}
+
+
+unordered_set<QualifiedName> BinaryView::GetOutgoingRecursiveTypeReferences(const unordered_set<QualifiedName>& types)
+{
+	size_t count;
+	vector<BNQualifiedName> apiTypes;
+	for (auto& type: types)
+	{
+		apiTypes.push_back(type.GetAPIObject());
+	}
+	BNQualifiedName* apiResult = BNGetOutgoingRecursiveTypeReferences(m_object, apiTypes.data(), apiTypes.size(), &count);
+	for (auto& type: apiTypes)
+	{
+		QualifiedName::FreeAPIObject(&type);
+	}
+	if (!apiResult)
+		return {};
+
+	unordered_set<QualifiedName> result;
+	for (size_t i = 0; i < count; i ++)
+	{
+		result.insert(QualifiedName::FromAPIObject(&apiResult[i]));
+	}
+	BNFreeTypeNameList(apiResult, count);
+	return result;
+}
+
+
+unordered_set<QualifiedName> BinaryView::GetIncomingDirectTypeReferences(const QualifiedName& type)
+{
+	size_t count;
+	BNQualifiedName apiType = type.GetAPIObject();
+	BNQualifiedName* apiResult = BNGetIncomingDirectTypeReferences(m_object, &apiType, &count);
+	QualifiedName::FreeAPIObject(&apiType);
+	if (!apiResult)
+		return {};
+
+	unordered_set<QualifiedName> result;
+	for (size_t i = 0; i < count; i ++)
+	{
+		result.insert(QualifiedName::FromAPIObject(&apiResult[i]));
+	}
+	BNFreeTypeNameList(apiResult, count);
+	return result;
+}
+
+
+unordered_set<QualifiedName> BinaryView::GetIncomingRecursiveTypeReferences(const QualifiedName& type)
+{
+	return GetIncomingRecursiveTypeReferences(unordered_set<QualifiedName>{type});
+}
+
+
+unordered_set<QualifiedName> BinaryView::GetIncomingRecursiveTypeReferences(const unordered_set<QualifiedName>& types)
+{
+	size_t count;
+	vector<BNQualifiedName> apiTypes;
+	for (auto& type: types)
+	{
+		apiTypes.push_back(type.GetAPIObject());
+	}
+	BNQualifiedName* apiResult = BNGetIncomingRecursiveTypeReferences(m_object, apiTypes.data(), apiTypes.size(), &count);
+	for (auto& type: apiTypes)
+	{
+		QualifiedName::FreeAPIObject(&type);
+	}
+	if (!apiResult)
+		return {};
+
+	unordered_set<QualifiedName> result;
+	for (size_t i = 0; i < count; i ++)
+	{
+		result.insert(QualifiedName::FromAPIObject(&apiResult[i]));
+	}
+	BNFreeTypeNameList(apiResult, count);
+	return result;
+}
+
+
 vector<uint64_t> BinaryView::GetCallees(ReferenceSource callSite)
 {
 	size_t count;
@@ -3170,7 +3286,11 @@ Ref<Component> BinaryView::CreateComponent(std::string parentGUID)
 
 Ref<Component> BinaryView::CreateComponent(Ref<Component> parent)
 {
-	auto bnComponent = BNCreateComponentWithParent(m_object, parent->GetGuid().c_str());
+	BNComponent* bnComponent;
+	if (parent)
+		bnComponent = BNCreateComponentWithParent(m_object, parent->GetGuid().c_str());
+	else
+		bnComponent = BNCreateComponent(m_object);
 
 	return new Component(bnComponent);
 }
@@ -3519,6 +3639,7 @@ bool BinaryView::ParseTypeString(const string& source, map<QualifiedName, Ref<Ty
 		errors = errorStr;
 		BNFreeString(errorStr);
 	}
+	delete[] typesList.names;
 	if (!ok)
 		return false;
 
@@ -3573,6 +3694,7 @@ bool BinaryView::ParseTypesFromSource(const string& source, const vector<string>
 		errors = errorStr;
 		BNFreeString(errorStr);
 	}
+	delete[] typesList.names;
 	if (!ok)
 		return false;
 
@@ -3611,6 +3733,24 @@ bool BinaryView::ParseTypesFromSource(const string& source, const vector<string>
 }
 
 
+TypeContainer BinaryView::GetTypeContainer()
+{
+	return TypeContainer(BNGetAnalysisTypeContainer(m_object));
+}
+
+
+TypeContainer BinaryView::GetAutoTypeContainer()
+{
+	return TypeContainer(BNGetAnalysisAutoTypeContainer(m_object));
+}
+
+
+TypeContainer BinaryView::GetUserTypeContainer()
+{
+	return TypeContainer(BNGetAnalysisUserTypeContainer(m_object));
+}
+
+
 map<QualifiedName, Ref<Type>> BinaryView::GetTypes()
 {
 	size_t count;
@@ -3623,7 +3763,7 @@ map<QualifiedName, Ref<Type>> BinaryView::GetTypes()
 		result[name] = new Type(BNNewTypeReference(types[i].type));
 	}
 
-	BNFreeTypeList(types, count);
+	BNFreeTypeAndNameList(types, count);
 	return result;
 }
 
@@ -3640,7 +3780,7 @@ vector<pair<QualifiedName, Ref<Type>>> BinaryView::GetDependencySortedTypes()
 		result.emplace_back(name, new Type(BNNewTypeReference(types[i].type)));
 	}
 
-	BNFreeTypeList(types, count);
+	BNFreeTypeAndNameList(types, count);
 	return result;
 }
 

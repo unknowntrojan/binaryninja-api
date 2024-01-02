@@ -37,6 +37,7 @@ from . import variable
 from . import architecture
 from . import binaryview
 from . import platform as _platform
+from . import typecontainer
 from . import typelibrary
 from . import typeparser
 
@@ -47,7 +48,7 @@ ParamsType = Union[List['Type'], List['FunctionParameter'], List[Tuple[str, 'Typ
 MembersType = Union[List['StructureMember'], List['Type'], List[Tuple['Type', str]]]
 EnumMembersType = Union[List[Tuple[str, int]], List[str], List['EnumerationMember']]
 SomeType = Union['TypeBuilder', 'Type']
-TypeContainer = Union['binaryview.BinaryView', 'typelibrary.TypeLibrary']
+TypeContainerType = Union['binaryview.BinaryView', 'typelibrary.TypeLibrary']
 NameSpaceType = Optional[Union[str, List[str], 'NameSpace']]
 TypeParserResult = typeparser.TypeParserResult
 # The following are needed to prevent the type checker from getting
@@ -236,6 +237,7 @@ class TypeDefinitionLine:
 	line_type: TypeDefinitionLineType
 	tokens: List['_function.InstructionTextToken']
 	type: 'Type'
+	parent_type: 'Type'
 	root_type: 'Type'
 	root_type_name: str
 	base_type: Optional['NamedTypeReferenceType']
@@ -253,6 +255,7 @@ class TypeDefinitionLine:
 	def _from_core_struct(struct: core.BNTypeDefinitionLine, platform: Optional[_platform.Platform] = None):
 		tokens = _function.InstructionTextToken._from_core_struct(struct.tokens, struct.count)
 		type_ = Type.create(handle=core.BNNewTypeReference(struct.type), platform=platform)
+		parent_type = Type.create(handle=core.BNNewTypeReference(struct.parentType), platform=platform)
 		root_type = Type.create(handle=core.BNNewTypeReference(struct.rootType), platform=platform)
 		root_type_name = core.pyNativeStr(struct.rootTypeName)
 		if struct.baseType:
@@ -262,7 +265,7 @@ class TypeDefinitionLine:
 			base_type = NamedTypeReferenceType(handle, platform)
 		else:
 			base_type = None
-		return TypeDefinitionLine(struct.lineType, tokens, type_, root_type, root_type_name, base_type,
+		return TypeDefinitionLine(struct.lineType, tokens, type_, parent_type, root_type, root_type_name, base_type,
 								  struct.baseOffset, struct.offset, struct.fieldIndex)
 
 	def _to_core_struct(self):
@@ -271,6 +274,7 @@ class TypeDefinitionLine:
 		struct.tokens = _function.InstructionTextToken._get_core_struct(self.tokens)
 		struct.count = len(self.tokens)
 		struct.type = core.BNNewTypeReference(self.type.handle)
+		struct.parentType = core.BNNewTypeReference(self.parent_type.handle)
 		struct.rootType = core.BNNewTypeReference(self.root_type.handle)
 		struct.rootTypeName = self.root_type_name
 		if self.base_type is None:
@@ -393,6 +397,7 @@ class Symbol(CoreSymbol):
 		ImportedDataSymbol          Symbol for data that is not defined in the current binary
 		ExternalSymbol              Symbols for data and code that reside outside the BinaryView
 		LibraryFunctionSymbol       Symbols for functions identified as belonging to a shared library
+		SymbolicFunctionSymbol      Symbols for functions without a concrete implementation or which have been abstractly represented
 		=========================== =================================================================
 	"""
 	def __init__(
@@ -515,7 +520,7 @@ class BoolWithConfidence:
 @dataclass
 class MutableTypeBuilder(Generic[TB]):
 	type: TB
-	container: TypeContainer
+	container: TypeContainerType
 	name: QualifiedName
 	platform: Optional['_platform.Platform']
 	confidence: int
@@ -601,7 +606,7 @@ class TypeBuilder:
 
 	@classmethod
 	def builder(
-	    cls: typing.Type[TB], container: TypeContainer, name: 'QualifiedName', user: bool = True, platform: Optional['_platform.Platform'] = None,
+	    cls: typing.Type[TB], container: TypeContainerType, name: 'QualifiedName', user: bool = True, platform: Optional['_platform.Platform'] = None,
 	    confidence: int = core.max_confidence
 	) -> 'MutableTypeBuilder[TB]':
 		return MutableTypeBuilder(cls.create(), container, name, platform, confidence, user)
@@ -1411,7 +1416,7 @@ class StructureBuilder(TypeBuilder):
 			return None
 		try:
 			return StructureMember(
-			    Type(core.BNNewTypeReference(member.contents.type), confidence=member.contents.typeConfidence),
+			    Type.create(core.BNNewTypeReference(member.contents.type), confidence=member.contents.typeConfidence),
 			    member.contents.name, member.contents.offset, MemberAccess(member.contents.access),
 			    MemberScope(member.contents.scope)
 			)
@@ -1638,6 +1643,9 @@ class NamedTypeReferenceBuilder(TypeBuilder):
 	    platform: Optional['_platform.Platform'] = None, confidence: int = core.max_confidence,
 	    const: BoolWithConfidenceType = False, volatile: BoolWithConfidenceType = False
 	) -> 'NamedTypeReferenceBuilder':
+
+		if not isinstance(type_class, NamedTypeReferenceClass):
+			raise ValueError("named_type_class must be a NamedTypeReferenceClass")
 		ntr_builder_handle = core.BNCreateNamedTypeBuilder(type_class, type_id, QualifiedName(name)._to_core_struct())
 		assert ntr_builder_handle is not None, "core.BNCreateNamedTypeBuilder returned None"
 
@@ -1754,6 +1762,8 @@ class Type:
 	"""
 	def __init__(self, handle, platform: Optional['_platform.Platform'] = None, confidence: int = core.max_confidence):
 		assert isinstance(handle.contents, core.BNType), "Attempting to create mutable Type"
+		if self.__class__ == Type:
+			raise Exception("Cannot instantiate Type directly use Type.create instead")
 		self._handle = handle
 		self._confidence = confidence
 		self._platform = platform
@@ -1992,7 +2002,7 @@ class Type:
 		return result
 
 	def get_lines(
-		self, bv: 'binaryview.BinaryView', name: str, line_width: int = 80, collapsed: bool = False,
+		self, bv: Union['binaryview.BinaryView', 'typecontainer.TypeContainer'], name: str, line_width: int = 80, collapsed: bool = False,
 		escaping: TokenEscapingType = TokenEscapingType.NoTokenEscapingType
 	) -> List['TypeDefinitionLine']:
 		"""
@@ -2009,7 +2019,13 @@ class Type:
 		:rtype: :py:class:`TypeDefinitionLine`
 		"""
 		count = ctypes.c_ulonglong()
-		core_lines = core.BNGetTypeLines(self._handle, bv.handle, name, line_width, collapsed, escaping, count)
+		if isinstance(bv, (binaryview.BinaryView,)):
+			container = bv.type_container
+		elif isinstance(bv, (typecontainer.TypeContainer,)):
+			container = bv
+		else:
+			assert False, "Unexpected type container type"
+		core_lines = core.BNGetTypeLines(self._handle, container.handle, name, line_width, collapsed, escaping, count)
 		assert core_lines is not None, "core.BNGetTypeLines returned None"
 		lines = []
 		for i in range(count.value):
@@ -2082,18 +2098,29 @@ class Type:
 		assert name is not None
 		return MutableTypeBuilder(type.mutable_copy(), bv, name, platform, confidence)
 
-	def with_replaced_structure(self, from_struct, to_struct):
-		handle = core.BNTypeWithReplacedStructure(self._handle, from_struct.handle, to_struct.handle)
+	def with_replaced_structure(self, from_struct: 'StructureType', to_struct: 'StructureType'):
+		if not isinstance(from_struct, StructureType):
+			raise ValueError("from_struct must be a StructureType")
+		if not isinstance(to_struct, StructureType):
+			raise ValueError("to_struct must be a StructureType")
+		handle = core.BNTypeWithReplacedStructure(self._handle, from_struct.ntr_handle, to_struct.ntr_handle)
 		return Type.create(handle)
 
-	def with_replaced_enumeration(self, from_enum, to_enum):
-		handle = core.BNTypeWithReplacedEnumeration(self._handle, from_enum.handle, to_enum.handle)
+	def with_replaced_enumeration(self, from_enum: 'EnumerationType', to_enum: 'EnumerationType'):
+		if not isinstance(from_enum, EnumerationType):
+			raise ValueError("from_enum must be an EnumerationType")
+		if not isinstance(to_enum, EnumerationType):
+			raise ValueError("to_enum must be an EnumerationType")
+		handle = core.BNTypeWithReplacedEnumeration(self._handle, from_enum.ntr_handle, to_enum.ntr_handle)
 		return Type.create(handle)
 
-	def with_replaced_named_type_reference(self, from_ref, to_ref):
-		return Type.create(
-		    handle=core.BNTypeWithReplacedNamedTypeReference(self._handle, from_ref.handle, to_ref.handle)
-		)
+	def with_replaced_named_type_reference(self, from_ref: 'NamedTypeReferenceType', to_ref: 'NamedTypeReferenceType'):
+		if not isinstance(from_ref, NamedTypeReferenceType):
+			raise ValueError("from_ref must be a NamedTypeReferenceType")
+		if not isinstance(to_ref, NamedTypeReferenceType):
+			raise ValueError("to_ref must be a NamedTypeReferenceType")
+		handle=core.BNTypeWithReplacedNamedTypeReference(self._handle, from_ref.ntr_handle, to_ref.ntr_handle)
+		return Type.create(handle)
 
 	@staticmethod
 	def void() -> 'VoidType':
@@ -2510,10 +2537,17 @@ class StructureType(Type):
 	def type(self) -> StructureVariant:
 		return StructureVariant(core.BNGetStructureType(self.struct_handle))
 
-	def members_including_inherited(self, view: 'binaryview.BinaryView') -> List[InheritedStructureMember]:
+	def members_including_inherited(self, view: Union['binaryview.BinaryView', 'typecontainer.TypeContainer']) -> List[InheritedStructureMember]:
 		"""Returns structure member list, including those inherited by base structures"""
 		count = ctypes.c_ulonglong()
-		members = core.BNGetStructureMembersIncludingInherited(self.struct_handle, view.handle, count)
+		if isinstance(view, (binaryview.BinaryView,)):
+			container = view.type_container
+		elif isinstance(view, (typecontainer.TypeContainer,)):
+			container = view
+		else:
+			assert False, "Unexpected type container type"
+
+		members = core.BNGetStructureMembersIncludingInherited(self.struct_handle, container.handle, count)
 		assert members is not None, "core.BNGetInheritedStructureMembers returned None"
 		try:
 			result = []
@@ -2573,18 +2607,18 @@ class StructureType(Type):
 		return result
 
 	def with_replaced_structure(self, from_struct, to_struct) -> 'StructureType':
-		return StructureType(
+		return StructureType.from_core_struct(
 		    core.BNStructureWithReplacedStructure(self.struct_handle, from_struct.handle, to_struct.handle)
 		)
 
 	def with_replaced_enumeration(self, from_enum, to_enum) -> 'StructureType':
-		return StructureType(
+		return StructureType.from_core_struct(
 		    core.BNStructureWithReplacedEnumeration(self.struct_handle, from_enum.handle, to_enum.handle)
 		)
 
 	def with_replaced_named_type_reference(self, from_ref, to_ref) -> 'StructureType':
-		return StructureType(
-		    core.BNStructureWithReplacedNamedTypeReference(self.struct_handle, from_ref.handle, to_ref.handle)
+		return StructureType.from_core_struct(
+		    core.BNStructureWithReplacedNamedTypeReference(self.struct_handle, from_ref.ntr_handle, to_ref.ntr_handle)
 		)
 
 	def generate_named_type_reference(self, guid: str, name: QualifiedNameType):
@@ -2948,10 +2982,11 @@ class NamedTypeReferenceType(Type):
 	    width: int = 0, platform: Optional['_platform.Platform'] = None, confidence: int = core.max_confidence,
 	    const: BoolWithConfidenceType = False, volatile: BoolWithConfidenceType = False
 	) -> 'NamedTypeReferenceType':
+		if not isinstance(named_type_class, NamedTypeReferenceClass):
+			raise ValueError("named_type_class must be a NamedTypeReferenceClass")
 		_guid = guid
 		if guid is None:
 			_guid = str(uuid.uuid4())
-
 		_name = QualifiedName(name)._to_core_struct()
 		core_ntr = core.BNCreateNamedType(named_type_class, _guid, _name)
 		assert core_ntr is not None, "core.BNCreateNamedType returned None"

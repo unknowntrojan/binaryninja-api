@@ -7,6 +7,12 @@
 > :warning: This project runs on Rust version `stable-2022-12-15`
 
 
+## Contributing
+
+:warning: If you're thinking of contributing to the Rust API, we encourage you to join the #rust-api channel in our Slack: https://slack.binary.ninja, especially for large-effort PRs.
+Add a "Contributing" section to the Rust API readme
+
+
 ## Dependencies
 
 Having BinaryNinja installed (and your license registered)  
@@ -40,9 +46,12 @@ See the `./examples/`.  Plugin registration commands are in `binaryninja::comman
 binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev"}
 ```
 
-All standalone binaries should call both `binaryninja::headless::init()` and `binaryninja::headless::shutdown()`.  
 All standalone binaries need to provide a `build.rs`.  
 See [`examples/template`](examples/template) for details.  
+
+## Docs
+
+Docs can be found at https://dev-rust.binary.ninja/
 
 ---
 

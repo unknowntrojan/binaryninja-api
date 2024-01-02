@@ -30,6 +30,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <exception>
 #include <functional>
 #include <set>
@@ -37,6 +38,7 @@
 #include <atomic>
 #include <memory>
 #include <cstdint>
+#include <typeinfo>
 #include <type_traits>
 #include <variant>
 #include <optional>
@@ -44,6 +46,9 @@
 #include "binaryninjacore.h"
 #include "exceptions.h"
 #include "json/json.h"
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <fmt/core.h>
 
 #ifdef _MSC_VER
 	#define NOEXCEPT
@@ -236,7 +241,7 @@ namespace BinaryNinja {
 #endif
 
 	  public:
-		Ref<T>() : m_obj(NULL) {}
+		Ref<T>() : m_obj(nullptr) {}
 
 		Ref<T>(T* obj) : m_obj(obj)
 		{
@@ -336,7 +341,7 @@ namespace BinaryNinja {
 
 		T& operator*() const { return *m_obj; }
 
-		bool operator!() const { return m_obj == NULL; }
+		bool operator!() const { return m_obj == nullptr; }
 
 		bool operator==(const T* obj) const { return T::GetObject(m_obj) == T::GetObject(obj); }
 
@@ -637,7 +642,7 @@ namespace BinaryNinja {
 	BN_PRINTF_ATTRIBUTE(1, 2)
 	void LogWarn(const char* fmt, ...);
 
-	/*! LogError writes text to the error console and pops up the error console. Additionall,
+	/*! LogError writes text to the error console and pops up the error console. Additionally,
 	    Errors in the console log include a error icon. LogError corresponds to the log level: ErrorLog.
 
 	    @threadsafe
@@ -662,6 +667,127 @@ namespace BinaryNinja {
 	*/
 	BN_PRINTF_ATTRIBUTE(1, 2)
 	void LogAlert(const char* fmt, ...);
+
+	// Implementation detail
+	void LogFV(BNLogLevel level, fmt::string_view format, fmt::format_args args);
+	void LogTraceFV(fmt::string_view format, fmt::format_args args);
+	void LogDebugFV(fmt::string_view format, fmt::format_args args);
+	void LogInfoFV(fmt::string_view format, fmt::format_args args);
+	void LogWarnFV(fmt::string_view format, fmt::format_args args);
+	void LogErrorFV(fmt::string_view format, fmt::format_args args);
+	void LogAlertFV(fmt::string_view format, fmt::format_args args);
+
+	/*! Logs to the error console with the given BNLogLevel.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param level BNLogLevel debug log level
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogF(BNLogLevel level, fmt::format_string<T...> format, T&&... args)
+	{
+		LogFV(level, format, fmt::make_format_args(args...));
+	}
+
+	/*! LogTrace only writes text to the error console if the console is set to log level: DebugLog
+		Log level and the build is not a DEBUG build (i.e. the preprocessor directive _DEBUG is defined)
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogTraceF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogTraceFV(format, fmt::make_format_args(args...));
+	}
+
+	/*! LogDebug only writes text to the error console if the console is set to log level: DebugLog
+		Log level DebugLog is the most verbose logging level in release builds.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogDebugF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogDebugFV(format, fmt::make_format_args(args...));
+	}
+
+	/*! LogInfo always writes text to the error console, and corresponds to the log level: InfoLog.
+		Log level InfoLog is the second most verbose logging level.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogInfoF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogInfoFV(format, fmt::make_format_args(args...));
+	}
+
+	/*! LogWarn writes text to the error console including a warning icon,
+		and also shows a warning icon in the bottom pane. LogWarn corresponds to the log level: WarningLog.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogWarnF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogWarnFV(format, fmt::make_format_args(args...));
+	}
+
+	/*! LogError writes text to the error console and pops up the error console. Additionally,
+		Errors in the console log include a error icon. LogError corresponds to the log level: ErrorLog.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogErrorF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogErrorFV(format, fmt::make_format_args(args...));
+	}
+
+	/*! LogAlert pops up a message box displaying the alert message and logs to the error console.
+		LogAlert corresponds to the log level: AlertLog.
+
+		@threadsafe
+
+		\ingroup logging
+
+		\param format fmt-style format string.
+		\param ... Variable arguments corresponding to the format string.
+	*/
+	template<typename... T>
+	void LogAlertF(fmt::format_string<T...> format, T&&... args)
+	{
+		LogAlertFV(format, fmt::make_format_args(args...));
+	}
 
 	/*! Redirects the minimum level passed to standard out
 
@@ -710,6 +836,17 @@ namespace BinaryNinja {
 	class Logger: public CoreRefCountObject<BNLogger, BNNewLoggerReference, BNFreeLogger>
 	{
 			size_t GetThreadId() const;
+			std::unordered_map<BNLogLevel, std::string> m_iterBuffer;
+			friend struct Iterator;
+
+			void LogFV(BNLogLevel level, fmt::string_view format, fmt::format_args args);
+			void LogTraceFV(fmt::string_view format, fmt::format_args args);
+			void LogDebugFV(fmt::string_view format, fmt::format_args args);
+			void LogInfoFV(fmt::string_view format, fmt::format_args args);
+			void LogWarnFV(fmt::string_view format, fmt::format_args args);
+			void LogErrorFV(fmt::string_view format, fmt::format_args args);
+			void LogAlertFV(fmt::string_view format, fmt::format_args args);
+
 		public:
 			Logger(BNLogger* logger);
 
@@ -802,6 +939,104 @@ namespace BinaryNinja {
 				\param ... Variable arguments corresponding to the format string.
 			*/
 			void LogAlert(const char* fmt, ...);
+
+			/*! Logs to the error console with the given BNLogLevel.
+
+					@threadsafe
+
+				\param level BNLogLevel debug log level
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogF(BNLogLevel level, fmt::format_string<T...> format, T&&... args)
+			{
+				LogFV(level, format, fmt::make_format_args(args...));
+			}
+
+			/*! LogTrace only writes text to the error console if the console is set to log level: DebugLog
+				Log level and the build is not a DEBUG build (i.e. the preprocessor directive _DEBUG is defined)
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogTraceF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogTraceFV(format, fmt::make_format_args(args...));
+			}
+
+			/*! LogDebug only writes text to the error console if the console is set to log level: DebugLog
+				Log level DebugLog is the most verbose logging level in release builds.
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogDebugF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogDebugFV(format, fmt::make_format_args(args...));
+			}
+
+			/*! LogInfo always writes text to the error console, and corresponds to the log level: InfoLog.
+				Log level InfoLog is the second most verbose logging level.
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogInfoF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogInfoFV(format, fmt::make_format_args(args...));
+			}
+
+			/*! LogWarn writes text to the error console including a warning icon,
+				and also shows a warning icon in the bottom pane. LogWarn corresponds to the log level: WarningLog.
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogWarnF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogWarnFV(format, fmt::make_format_args(args...));
+			}
+
+			/*! LogError writes text to the error console and pops up the error console. Additionally,
+				Errors in the console log include a error icon. LogError corresponds to the log level: ErrorLog.
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogErrorF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogErrorFV(format, fmt::make_format_args(args...));
+			}
+
+			/*! LogAlert pops up a message box displaying the alert message and logs to the error console.
+				LogAlert corresponds to the log level: AlertLog.
+
+					@threadsafe
+
+				\param format fmt-style format string.
+				\param ... Variable arguments corresponding to the format string.
+			*/
+			template<typename... T>
+			void LogAlertF(fmt::format_string<T...> format, T&&... args)
+			{
+				LogAlertFV(format, fmt::make_format_args(args...));
+			}
 
 			/*! Get the name registered for this Logger
 
@@ -937,6 +1172,47 @@ namespace BinaryNinja {
 	void SetCurrentPluginLoadOrder(BNPluginLoadOrder order);
 	void AddRequiredPluginDependency(const std::string& name);
 	void AddOptionalPluginDependency(const std::string& name);
+
+	template<typename T>
+	std::string CoreEnumName()
+	{
+		// Extremely implementation-defined. Best-effort is made for our relevant platforms
+#ifdef WIN32
+		// "enum TestEnum"
+		return std::string(typeid(T).name()).substr(5);
+#else
+		// "19BNWhateverItsCalled"
+		auto name = std::string(typeid(T).name());
+		while (std::isdigit(name[0]))
+		{
+			name.erase(0, 1);
+		}
+		return name;
+#endif
+	}
+
+	template<typename T>
+	std::optional<std::string> CoreEnumToString(T value)
+	{
+		auto name = CoreEnumName<T>();
+		char* result;
+		if (!BNCoreEnumToString(name.c_str(), (size_t)value, &result))
+			return std::nullopt;
+		auto cppResult = std::string(result);
+		BNFreeString(result);
+		return cppResult;
+	}
+
+	template<typename T>
+	std::optional<T> CoreEnumFromString(const std::string& value)
+	{
+		auto name = CoreEnumName<T>();
+		size_t result;
+		if (!BNCoreEnumFromString(name.c_str(), value.c_str(), &result))
+			return std::nullopt;
+		return result;
+	}
+
 	/*!
 		@}
 	*/
@@ -1086,8 +1362,8 @@ namespace BinaryNinja {
 		std::vector<int64_t> GetSignedIntegerList() const;
 		std::vector<double> GetDoubleList() const;
 		std::vector<uint8_t> GetRaw() const;
-		std::vector<Ref<Metadata>> GetArray();
-		std::map<std::string, Ref<Metadata>> GetKeyValueStore();
+		std::vector<Ref<Metadata>> GetArray() const;
+		std::map<std::string, Ref<Metadata>> GetKeyValueStore() const;
 
 		// For key-value data only
 		/*! Get a Metadata object by key. Only for if IsKeyValueStore == true
@@ -1517,7 +1793,18 @@ namespace BinaryNinja {
 		\return Whether a choice was successfully picked
 	*/
 	bool GetChoiceInput(
-	    size_t& idx, const std::string& prompt, const std::string& title, const std::vector<std::string>& choices);
+		size_t& idx, const std::string& prompt, const std::string& title, const std::vector<std::string>& choices);
+
+	/*! Prompts the user to select the one of the provided choices out of a large list, with the option to filter choices
+
+		\ingroup interaction
+		\param[out] idx Reference to the size_t the resulting index selected will be copied to
+		\param[in] title Title for the input popup / prompt for headless
+		\param[in] prompt Prompt for the input (shown on the 'Select' button in UI)
+		\param[in] choices List of string choices for the user to select from
+		\return Whether a choice was successfully picked
+	*/
+	bool GetLargeChoiceInput(size_t& idx, const std::string& title, const std::string& prompt, const std::vector<std::string>& choices);
 
 	/*! Prompts the user for a file name to open
 
@@ -2538,7 +2825,7 @@ namespace BinaryNinja {
 			SegmentUpdates = SegmentLifetime | SegmentUpdated,
 			SectionLifetime = SectionAdded | SectionRemoved,
 			SectionUpdates = SectionLifetime | SectionUpdated,
-			ComponentUpdates = ComponentAdded | ComponentRemoved | ComponentMoved | ComponentFunctionAdded | ComponentFunctionRemoved | ComponentDataVariableAdded | ComponentDataVariableRemoved
+			ComponentUpdates = ComponentNameUpdated | ComponentAdded | ComponentRemoved | ComponentMoved | ComponentFunctionAdded | ComponentFunctionRemoved | ComponentDataVariableAdded | ComponentDataVariableRemoved
 		};
 
 		using NotificationTypes = uint64_t;
@@ -2885,7 +3172,7 @@ namespace BinaryNinja {
 
 	  public:
 		NameList(const BNQualifiedName* name);
-		NameList(const std::string& join, size_t size = 0);
+		explicit NameList(const std::string& join, size_t size = 0);
 		NameList(const std::string& name, const std::string& join);
 		NameList(const std::vector<std::string>& name, const std::string& join);
 		NameList(const NameList& name, const std::string& join);
@@ -3014,6 +3301,7 @@ namespace BinaryNinja {
 				ImportedDataSymbol          Symbol for data that is not defined in the current binary
 				ExternalSymbol              Symbols for data and code that reside outside the BinaryView
 				LibraryFunctionSymbol       Symbols for functions identified as belonging to a shared library
+				SymbolicFunctionSymbol      Symbols for functions without a concrete implementation or which have been abstractly represented
 				=========================== =================================================================
 
 		    \return Symbol type
@@ -3158,7 +3446,7 @@ namespace BinaryNinja {
 	{
 		BNTypeDefinitionLineType lineType;
 		std::vector<InstructionTextToken> tokens;
-		Ref<Type> type, rootType;
+		Ref<Type> type, parentType, rootType;
 		std::string rootTypeName;
 		Ref<NamedTypeReference> baseType;
 		uint64_t baseOffset;
@@ -3338,6 +3626,7 @@ namespace BinaryNinja {
 
 		static BNTag** CreateTagList(const std::vector<Ref<Tag>>& tags, size_t* count);
 		static std::vector<Ref<Tag>> ConvertTagList(BNTag** tags, size_t count);
+		static void FreeTagList(BNTag** tags, size_t count);
 		static std::vector<Ref<Tag>> ConvertAndFreeTagList(BNTag** tags, size_t count);
 	};
 
@@ -3368,6 +3657,7 @@ namespace BinaryNinja {
 
 		static BNTagReference* CreateTagReferenceList(const std::vector<TagReference>& tags, size_t* count);
 		static std::vector<TagReference> ConvertTagReferenceList(BNTagReference* tags, size_t count);
+		static void FreeTagReferenceList(BNTagReference* tags, size_t count);
 		static std::vector<TagReference> ConvertAndFreeTagReferenceList(BNTagReference* tags, size_t count);
 	};
 
@@ -4494,6 +4784,13 @@ namespace BinaryNinja {
 		*/
 		std::vector<Confidence<Ref<Type>>> GetTypesReferenced(const QualifiedName& type, uint64_t offset);
 
+		std::unordered_set<QualifiedName> GetOutgoingDirectTypeReferences(const QualifiedName& type);
+		std::unordered_set<QualifiedName> GetOutgoingRecursiveTypeReferences(const QualifiedName& type);
+		std::unordered_set<QualifiedName> GetOutgoingRecursiveTypeReferences(const std::unordered_set<QualifiedName>& types);
+		std::unordered_set<QualifiedName> GetIncomingDirectTypeReferences(const QualifiedName& type);
+		std::unordered_set<QualifiedName> GetIncomingRecursiveTypeReferences(const QualifiedName& type);
+		std::unordered_set<QualifiedName> GetIncomingRecursiveTypeReferences(const std::unordered_set<QualifiedName>& types);
+
 		Ref<Structure> CreateStructureBasedOnFieldAccesses(const QualifiedName& type); // Unimplemented!
 
 		/*! Returns a list of virtual addresses called by the call site in the ReferenceSource
@@ -5113,6 +5410,23 @@ namespace BinaryNinja {
 		    std::string& errors, const std::set<QualifiedName>& typesAllowRedefinition = {});
 		bool ParseTypesFromSource(const std::string& text, const std::vector<std::string>& options, const std::vector<std::string>& includeDirs, TypeParserResult& result,
 		    std::string& errors, const std::set<QualifiedName>& typesAllowRedefinition = {});
+
+		/*! Type Container for all types (user and auto) in the BinaryView. Any auto types
+			modified through the Type Container will be converted into user types.
+			\return Full view Type Container
+		 */
+		class TypeContainer GetTypeContainer();
+
+		/*! Type Container for ONLY auto types in the BinaryView. Any changes to types will
+			NOT promote auto types to user types.
+			\return Auto types only Type Container
+		 */
+		class TypeContainer GetAutoTypeContainer();
+
+		/*! Type Container for ONLY user types in the BinaryView.
+			\return User types only Type Container
+		 */
+		class TypeContainer GetUserTypeContainer();
 
 		std::map<QualifiedName, Ref<Type>> GetTypes();
 		/*! List of all types, sorted such that types are after all types on which they depend
@@ -7870,7 +8184,7 @@ namespace BinaryNinja {
 
 		bool AddTypeMemberTokens(BinaryView* data, std::vector<InstructionTextToken>& tokens, int64_t offset,
 		    std::vector<std::string>& nameList, size_t size = 0, bool indirect = false);
-		std::vector<TypeDefinitionLine> GetLines(Ref<BinaryView> data, const std::string& name,
+		std::vector<TypeDefinitionLine> GetLines(const TypeContainer& types, const std::string& name,
 			int lineWidth = 80, bool collapsed = false, BNTokenEscapingType escaping = NoTokenEscapingType);
 
 		static std::string GetSizeSuffix(size_t size);
@@ -8070,7 +8384,7 @@ namespace BinaryNinja {
 	*/
 	struct StructureMember
 	{
-		Ref<Type> type;
+		Confidence<Ref<Type>> type;
 		std::string name;
 		uint64_t offset;
 		BNMemberAccess access;
@@ -8127,7 +8441,7 @@ namespace BinaryNinja {
 
 		    \return The list of structure members
 		*/
-		std::vector<InheritedStructureMember> GetMembersIncludingInherited(BinaryView* view) const;
+		std::vector<InheritedStructureMember> GetMembersIncludingInherited(const TypeContainer& types) const;
 
 		/*! Get a structure member (including inherited members) at a certain offset
 
@@ -8136,7 +8450,7 @@ namespace BinaryNinja {
 			\param result Reference to a InheritedStructureMember to copy the result to
 			\return Whether a member was found
 		*/
-		bool  GetMemberIncludingInheritedAtOffset(BinaryView* view, int64_t offset,
+		bool GetMemberIncludingInheritedAtOffset(BinaryView* view, int64_t offset,
 			InheritedStructureMember& result) const;
 
 		/*! Get a structure member by name
@@ -9159,6 +9473,7 @@ namespace BinaryNinja {
 
 		static PossibleValueSet FromAPIObject(BNPossibleValueSet& value);
 		BNPossibleValueSet ToAPIObject();
+		static void FreeAPIObject(BNPossibleValueSet* value);
 	};
 
 	class FlowGraph;
@@ -10174,6 +10489,13 @@ namespace BinaryNinja {
 
 		void PrepareToCopyFunction(LowLevelILFunction* func);
 		void PrepareToCopyBlock(BasicBlock* block);
+
+		/*! Get the LowLevelILLabel for a given source instruction. The returned pointer is to an internal object with
+			the same lifetime as the containing LowLevelILFunction.
+
+			\param i The source instruction index
+			\return The LowLevelILLabel for the source instruction
+		*/
 		BNLowLevelILLabel* GetLabelForSourceInstruction(size_t i);
 
 		/*! Get the current IL address.
@@ -10936,6 +11258,10 @@ namespace BinaryNinja {
 		    const SSARegister& stack, size_t newMemoryVer, size_t prevMemoryVer,
 		    const ILSourceLocation& loc = ILSourceLocation());
 
+		ExprId SeparateParamListSSA(
+			const std::vector<ExprId>& params, const ILSourceLocation& loc = ILSourceLocation());
+		ExprId SharedParamSlotSSA(const std::vector<ExprId>& params, const ILSourceLocation& loc = ILSourceLocation());
+
 		/*! Returns an expression which jumps (branches) to the expression \c dest . \c ret is a special alias for
 			jump that makes the disassembler stop disassembling.
 
@@ -11449,8 +11775,16 @@ namespace BinaryNinja {
 		void ReplaceExpr(size_t expr, size_t newExpr);
 		void SetExprAttributes(size_t expr, uint32_t attributes);
 
-		void AddLabelForAddress(Architecture* arch, ExprId addr);
-		BNLowLevelILLabel* GetLabelForAddress(Architecture* arch, ExprId addr);
+		void AddLabelForAddress(Architecture* arch, uint64_t addr);
+
+		/*! Get the LowLevelILLabel for a given address. The returned pointer is to an internal object with
+		    the same lifetime as the containing LowLevelILFunction.
+
+			\param[in] arch Architecture for the address
+			\param[in] addr Address to get the label for
+			\return The LowLevelILLabel for the address
+		*/
+		BNLowLevelILLabel* GetLabelForAddress(Architecture* arch, uint64_t addr);
 
 		/*! Ends the function and computes the list of basic blocks.
 		*/
@@ -11578,6 +11912,13 @@ namespace BinaryNinja {
 
 		void PrepareToCopyFunction(MediumLevelILFunction* func);
 		void PrepareToCopyBlock(BasicBlock* block);
+
+		/*! Get the MediumLevelILLabel for a given source instruction. The returned pointer is to an internal object with
+			the same lifetime as the containing MediumLevelILFunction.
+
+			\param i Index of the source instruction
+			\return The MediumLevelILLabel for the source instruction
+		*/
 		BNMediumLevelILLabel* GetLabelForSourceInstruction(size_t i);
 
 		ExprId AddExpr(BNMediumLevelILOperation operation, size_t size, ExprId a = 0, ExprId b = 0, ExprId c = 0,
@@ -11688,31 +12029,33 @@ namespace BinaryNinja {
 		ExprId ReturnHint(ExprId dest, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId Call(const std::vector<Variable>& output, ExprId dest, const std::vector<ExprId>& params,
 		    const ILSourceLocation& loc = ILSourceLocation());
-		ExprId CallUntyped(const std::vector<Variable>& output, ExprId dest, const std::vector<Variable>& params,
-		    ExprId stack, const ILSourceLocation& loc = ILSourceLocation());
+		ExprId CallUntyped(const std::vector<Variable>& output, ExprId dest, const std::vector<ExprId>& params,
+			ExprId stack, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId Syscall(const std::vector<Variable>& output, const std::vector<ExprId>& params,
 		    const ILSourceLocation& loc = ILSourceLocation());
-		ExprId SyscallUntyped(const std::vector<Variable>& output, const std::vector<Variable>& params, ExprId stack,
-		    const ILSourceLocation& loc = ILSourceLocation());
+		ExprId SyscallUntyped(const std::vector<Variable>& output, const std::vector<ExprId>& params, ExprId stack,
+			const ILSourceLocation& loc = ILSourceLocation());
 		ExprId TailCall(const std::vector<Variable>& output, ExprId dest, const std::vector<ExprId>& params,
 		    const ILSourceLocation& loc = ILSourceLocation());
-		ExprId TailCallUntyped(const std::vector<Variable>& output, ExprId dest, const std::vector<Variable>& params,
-		    ExprId stack, const ILSourceLocation& loc = ILSourceLocation());
+		ExprId TailCallUntyped(const std::vector<Variable>& output, ExprId dest, const std::vector<ExprId>& params,
+			ExprId stack, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId CallSSA(const std::vector<SSAVariable>& output, ExprId dest, const std::vector<ExprId>& params,
 		    size_t newMemVersion, size_t prevMemVersion, const ILSourceLocation& loc = ILSourceLocation());
-		ExprId CallUntypedSSA(const std::vector<SSAVariable>& output, ExprId dest,
-		    const std::vector<SSAVariable>& params, size_t newMemVersion, size_t prevMemVersion, ExprId stack,
-		    const ILSourceLocation& loc = ILSourceLocation());
+		ExprId CallUntypedSSA(const std::vector<SSAVariable>& output, ExprId dest, const std::vector<ExprId>& params,
+			size_t newMemVersion, size_t prevMemVersion, ExprId stack,
+			const ILSourceLocation& loc = ILSourceLocation());
 		ExprId SyscallSSA(const std::vector<SSAVariable>& output, const std::vector<ExprId>& params,
 		    size_t newMemVersion, size_t prevMemVersion, const ILSourceLocation& loc = ILSourceLocation());
-		ExprId SyscallUntypedSSA(const std::vector<SSAVariable>& output, const std::vector<SSAVariable>& params,
-		    size_t newMemVersion, size_t prevMemVersion, ExprId stack,
-		    const ILSourceLocation& loc = ILSourceLocation());
+		ExprId SyscallUntypedSSA(const std::vector<SSAVariable>& output, const std::vector<ExprId>& params,
+			size_t newMemVersion, size_t prevMemVersion, ExprId stack,
+			const ILSourceLocation& loc = ILSourceLocation());
 		ExprId TailCallSSA(const std::vector<SSAVariable>& output, ExprId dest, const std::vector<ExprId>& params,
 		    size_t newMemVersion, size_t prevMemVersion, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId TailCallUntypedSSA(const std::vector<SSAVariable>& output, ExprId dest,
-		    const std::vector<SSAVariable>& params, size_t newMemVersion, size_t prevMemVersion, ExprId stack,
-		    const ILSourceLocation& loc = ILSourceLocation());
+			const std::vector<ExprId>& params, size_t newMemVersion, size_t prevMemVersion, ExprId stack,
+			const ILSourceLocation& loc = ILSourceLocation());
+		ExprId SeparateParamList(const std::vector<ExprId>& params, const ILSourceLocation& loc = ILSourceLocation());
+		ExprId SharedParamSlot(const std::vector<ExprId>& params, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId Return(const std::vector<ExprId>& sources, const ILSourceLocation& loc = ILSourceLocation());
 		ExprId NoReturn(const ILSourceLocation& loc = ILSourceLocation());
 		ExprId CompareEqual(size_t size, ExprId left, ExprId right, const ILSourceLocation& loc = ILSourceLocation());
@@ -13562,6 +13905,10 @@ namespace BinaryNinja {
 
 		std::vector<Ref<TypeLibrary>> GetTypeLibrariesByName(const std::string& name);
 
+		/*! Type Container for all registered types in the Platform.
+			\return Platform types Type Container
+		 */
+		TypeContainer GetTypeContainer();
 
 		Ref<Type> GetTypeByName(const QualifiedName& name);
 		Ref<Type> GetVariableByName(const QualifiedName& name);
@@ -13840,7 +14187,7 @@ namespace BinaryNinja {
 			BNPlatform* platform, BNTokenEscapingType escaping, char** result);
 		static bool GetTypeStringAfterNameCallback(void* ctxt, BNType* type,
 			BNPlatform* platform, BNTokenEscapingType escaping, char** result);
-		static bool GetTypeLinesCallback(void* ctxt, BNType* type, BNBinaryView* data,
+		static bool GetTypeLinesCallback(void* ctxt, BNType* type, BNTypeContainer* types,
 			BNQualifiedName* name, int lineWidth, bool collapsed,
 			BNTokenEscapingType escaping, BNTypeDefinitionLine** result, size_t* resultCount);
 		static bool PrintAllTypesCallback(void* ctxt, BNQualifiedName* names, BNType** types, size_t typeCount,
@@ -13954,7 +14301,7 @@ namespace BinaryNinja {
 		/*!
 		    Generate a multi-line representation of a type
 		    \param type Type to print
-		    \param data Binary View in which the type is defined
+		    \param types Type Container in which the type is defined
 		    \param name Name of the type
 		    \param lineWidth Maximum width of lines, in characters
 		    \param collapsed Whether to collapse structure/enum blocks
@@ -13963,7 +14310,7 @@ namespace BinaryNinja {
 		*/
 		virtual std::vector<TypeDefinitionLine> GetTypeLines(
 			Ref<Type> type,
-			Ref<BinaryView> data,
+			const TypeContainer& types,
 			const QualifiedName& name,
 			int lineWidth = 80,
 			bool collapsed = false,
@@ -14027,7 +14374,7 @@ namespace BinaryNinja {
 		virtual std::string GetTypeStringAfterName(Ref<Type> type, Ref<Platform> platform,
 			BNTokenEscapingType escaping) override;
 		virtual std::vector<TypeDefinitionLine> GetTypeLines(Ref<Type> type,
-			Ref<BinaryView> data, const QualifiedName& name, int lineWidth,
+			const TypeContainer& types, const QualifiedName& name, int lineWidth,
 			bool collapsed, BNTokenEscapingType escaping) override;
 		virtual std::string PrintAllTypes(const std::vector<std::pair<QualifiedName, Ref<Type>>>& types,
 			Ref<BinaryView> data, int lineWidth, BNTokenEscapingType escaping) override;
@@ -14527,7 +14874,9 @@ namespace BinaryNinja {
 		virtual bool GetAddressInput(uint64_t& result, const std::string& prompt, const std::string& title,
 		    Ref<BinaryView> view, uint64_t currentAddr);
 		virtual bool GetChoiceInput(size_t& idx, const std::string& prompt, const std::string& title,
-		    const std::vector<std::string>& choices) = 0;
+			const std::vector<std::string>& choices) = 0;
+		virtual bool GetLargeChoiceInput(size_t& idx, const std::string& prompt, const std::string& title,
+			const std::vector<std::string>& choices) = 0;
 		virtual bool GetOpenFileNameInput(std::string& result, const std::string& prompt, const std::string& ext = "");
 		virtual bool GetSaveFileNameInput(std::string& result, const std::string& prompt, const std::string& ext = "",
 		    const std::string& defaultName = "");
@@ -14681,6 +15030,7 @@ namespace BinaryNinja {
 			"message"            string                                   None                 Yes        An optional message with additional emphasis
 			"readOnly"           bool                                     None                 Yes        Only enforced by UI elements
 			"optional"           bool                                     None                 Yes        Indicates setting can be null
+			"hidden"             bool                                     "type" is "string"   Yes        Indicates the UI should conceal the content
 			"requiresRestart     bool                                     None                 Yes        Enable restart notification in the UI upon change
 			==================   ======================================   ==================   ========   =======================================================================
 
@@ -14914,6 +15264,7 @@ namespace BinaryNinja {
 		    BNType* type, const BNInstructionTextToken* prefix, size_t prefixCount, size_t width, size_t* count,
 		    BNTypeContext* typeCxt, size_t ctxCount);
 		static void FreeCallback(void* ctxt);
+		static void FreeLinesCallback(void* ctxt, BNDisassemblyTextLine* lines, size_t count);
 
 	  public:
 		DataRenderer();
@@ -15189,6 +15540,13 @@ namespace BinaryNinja {
 		DebugInfo(BNDebugInfo* debugInfo);
 
 		std::vector<std::string> GetParsers() const;
+
+		/*! Type Container for all types in the DebugInfo that resulted from the parse of
+			the given parser.
+			\param parserName Name of parser
+			\return Type Container for types from that parser
+		 */
+		TypeContainer GetTypeContainer(const std::string& parserName);
 
 		std::vector<NameAndType> GetTypes(const std::string& parserName = "") const;
 		std::vector<DebugFunctionInfo> GetFunctions(const std::string& parserName = "") const;
@@ -15612,6 +15970,12 @@ namespace BinaryNinja {
 		*/
 		void SetGuid(const std::string& guid);
 
+		/*! Type Container for all TYPES within the Type Library. Objects are not included.
+			The Type Container's Platform will be the first platform associated with the Type Library.
+			\return Type Library Type Container
+		 */
+		TypeContainer GetTypeContainer();
+
 		/*! Direct extracts a reference to a contained object -- when attempting to extract types from a library
 			into a BinaryView, consider using BinaryView::ImportTypeLibraryObject instead.
 
@@ -15734,6 +16098,188 @@ namespace BinaryNinja {
 	};
 
 	/*!
+		A TypeContainer is a generic interface to access various Binary Ninja models
+		that contain types. Types are stored with both a unique id and a unique name.
+
+		\ingroup types
+	 */
+	class TypeContainer
+	{
+		BNTypeContainer* m_object;
+
+	public:
+		explicit TypeContainer(BNTypeContainer* container);
+		explicit TypeContainer(TypeContainer&& other);
+
+		/*! Get the Type Container for a given BinaryView
+			\param data BinaryView source
+		 */
+		TypeContainer(Ref<BinaryView> data);
+
+		/*! Get the Type Container for a Type Library
+			\note The Platform for the Type Container will be the first Platform
+			      associated with the Type Library
+			\param library TypeLibrary source
+		 */
+		TypeContainer(Ref<TypeLibrary> library);
+
+		/*! Get the Type Container for a Platform
+			\param platform Platform source
+		 */
+		TypeContainer(Ref<Platform> platform);
+
+		~TypeContainer();
+		TypeContainer(const TypeContainer& other);
+		TypeContainer& operator=(const TypeContainer& other);
+		TypeContainer& operator=(TypeContainer&& other);
+		bool operator==(const TypeContainer& other) const { return GetId() == other.GetId(); }
+		bool operator!=(const TypeContainer& other) const { return !operator==(other); }
+
+		BNTypeContainer* GetObject() const { return m_object; }
+
+		/*! Get an id string for the Type Container. This will be unique within a given
+			analysis session, but may not be globally unique.
+			\return Identifier string
+		 */
+		std::string GetId() const;
+
+		/*! Get a user-friendly name for the Type Container.
+			\return Display name
+		 */
+		std::string GetName() const;
+
+		/*! Get the type of underlying model the Type Container is accessing.
+			\return Container type enum
+		 */
+		BNTypeContainerType GetType() const;
+
+		/*! Test if the Type Container supports mutable operations (add, rename, delete)
+			\return True if mutable
+		 */
+		bool IsMutable() const;
+
+		/*! Get the Platform object associated with this Type Container. All Type Containers
+			have exactly one associated Platform (as opposed to, e.g. Type Libraries).
+			\return Associated Platform object
+		 */
+		Ref<Platform> GetPlatform() const;
+
+
+		/*! Add or update a single type in the Type Container. If the Type Container already contains
+			a type with the same name as a type being added, the existing type will be
+			replaced with the definition given to this function, and references will be
+			updated in the source model.
+			\param name Name of type to add
+			\param type Definition of type to add
+			\return String of added type's id, if successful, std::nullopt otherwise
+		 */
+		std::optional<std::string> AddType(QualifiedName name, Ref<Type> type);
+
+		/*! Add or update types to a Type Container. If the Type Container already contains
+			a type with the same name as a type being added, the existing type will be
+			replaced with the definition given to this function, and references will be
+			updated in the source model.
+
+			An optional progress callback is included because adding many types can be a slow operation.
+
+			\param types List of (name, definition) pairs of new types to add
+			\param progress Optional function to call for progress updates
+			\return Map of name -> id of type in Type Container for all added typesif successful,
+			        std::nullopt otherwise.
+		 */
+		std::optional<std::unordered_map<QualifiedName, std::string>> AddTypes(
+			const std::vector<std::pair<QualifiedName, Ref<Type>>>& types,
+			std::function<bool(size_t, size_t)> progress = {});
+
+		/*! Rename a type in the Type Container. All references to this type will be updated
+			(by id) to use the new name.
+			\param typeId Id of type to update
+			\param newName New name for the type
+			\return True if successful
+		 */
+		bool RenameType(const std::string& typeId, const QualifiedName& newName);
+
+		/*! Delete a type in the Type Container. Behavior of references to this type is
+			not specified and you may end up with broken references if any still exist.
+			\param typeId Id of type to delete
+			\return True if successful
+		 */
+		bool DeleteType(const std::string& typeId);
+
+
+		/*! Get the unique id of the type in the Type Container with the given name.
+			If no type with that name exists, returns std::nullopt.
+			\param typeName Name of type
+			\return Type id, if exists, else, std::nullopt
+		 */
+		std::optional<std::string> GetTypeId(const QualifiedName& typeName) const;
+
+		/*! Get the unique name of the type in the Type Container with the given id.
+			If no type with that id exists, returns std::nullopt.
+			\param typeId Id of type
+			\return Type name, if exists, else, std::nullopt
+		 */
+		std::optional<QualifiedName> GetTypeName(const std::string& typeId) const;
+
+		/*! Get the definition of the type in the Type Container with the given id.
+			If no type with that id exists, returns std::nullopt.
+			\param typeId Id of type
+			\return Type object, if exists, else, std::nullopt
+		 */
+		std::optional<Ref<Type>> GetTypeById(const std::string& typeId) const;
+
+		/*! Get a mapping of all types in a Type Container.
+			\return All types in a map of type id -> (type name, type definition)
+		 */
+		std::optional<std::unordered_map<std::string, std::pair<QualifiedName, Ref<Type>>>> GetTypes() const;
+
+
+		/*! Get the definition of the type in the Type Container with the given name.
+			If no type with that name exists, returns None.
+			\param typeName Name of type
+			\return Type object, if exists, else, None
+		 */
+		std::optional<Ref<Type>> GetTypeByName(const QualifiedName& typeName) const;
+
+		/*! Get all type ids in a Type Container.
+			\return List of all type ids
+		 */
+		std::optional<std::unordered_set<std::string>> GetTypeIds() const;
+
+		/*! Get all type names in a Type Container.
+			\return List of all type names
+		 */
+		std::optional<std::unordered_set<QualifiedName>> GetTypeNames() const;
+
+		/*! Get a mapping of all type ids and type names in a Type Container.
+			\return Map of type id -> type name
+		 */
+		std::optional<std::unordered_map<std::string, QualifiedName>> GetTypeNamesAndIds() const;
+
+		/*! Parse an entire block of source into types, variables, and functions, with
+			knowledge of the types in the Type Container.
+
+			\param text Source code to parse
+			\param fileName Name of the file containing the source (optional: exists on disk)
+			\param options Optional string arguments to pass as options, e.g. command line arguments
+			\param includeDirs Optional list of directories to include in the header search path
+			\param autoTypeSource Optional source of types if used for automatically generated types
+			\param result Reference to structure into which the results will be written
+			\param errors Reference to a list into which any parse errors will be written
+			\return True if successful
+		 */
+		bool ParseTypesFromSource(
+			const std::string& text,
+			const std::string& fileName,
+			const std::vector<std::string>& options,
+			const std::vector<std::string>& includeDirs,
+			const std::string& autoTypeSource,
+			TypeParserResult& result,
+			std::vector<TypeParserError>& errors
+		);
+	};
+
+	/*!
 	    \ingroup binaryview
 	*/
 	class SymbolQueue
@@ -15751,3 +16297,105 @@ namespace BinaryNinja {
 		void Process();
 	};
 }  // namespace BinaryNinja
+
+
+namespace std
+{
+	template<> struct hash<BinaryNinja::QualifiedName>
+	{
+		typedef BinaryNinja::QualifiedName argument_type;
+		size_t operator()(argument_type const& value) const
+		{
+			return std::hash<std::string>()(value.GetString());
+		}
+	};
+
+	template<typename T> struct hash<BinaryNinja::Ref<T>>
+	{
+		typedef BinaryNinja::Ref<T> argument_type;
+		size_t operator()(argument_type const& value) const
+		{
+			return std::hash<decltype(T::GetObject(value.GetPtr()))>()(T::GetObject(value.GetPtr()));
+		}
+	};
+}  // namespace std
+
+
+template<typename T> struct fmt::formatter<BinaryNinja::Ref<T>>
+{
+	format_context::iterator format(const BinaryNinja::Ref<T>& obj, format_context& ctx) const
+	{
+		return fmt::formatter<T>().format(*obj.GetPtr(), ctx);
+	}
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+};
+
+template<typename T> struct fmt::formatter<BinaryNinja::Confidence<T>>
+{
+	format_context::iterator format(const BinaryNinja::Confidence<T>& obj, format_context& ctx) const
+	{
+		fmt::formatter<T>().format(obj.GetValue(), ctx);
+		return fmt::format_to(ctx.out(), " ({} confidence)", ctx);
+	}
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+};
+
+template<typename T> struct fmt::formatter<BinaryNinja::Confidence<BinaryNinja::Ref<T>>>
+{
+	format_context::iterator format(const BinaryNinja::Confidence<BinaryNinja::Ref<T>>& obj, format_context& ctx) const
+	{
+		fmt::formatter<T>().format(*obj.GetValue().GetPtr(), ctx);
+		return fmt::format_to(ctx.out(), " ({} confidence)", ctx);
+	}
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+};
+
+template<> struct fmt::formatter<BinaryNinja::Metadata>
+{
+	format_context::iterator format(const BinaryNinja::Metadata& obj, format_context& ctx) const;
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+};
+
+template<> struct fmt::formatter<BinaryNinja::NameList>
+{
+	format_context::iterator format(const BinaryNinja::NameList& obj, format_context& ctx) const;
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+};
+
+template<typename T>
+struct fmt::formatter<T, char, std::enable_if_t<std::is_enum_v<T>, void>>
+{
+	// s -> name, S -> scoped::name, d -> int, x -> hex
+	char presentation = 's';
+	format_context::iterator format(const T& obj, format_context& ctx) const
+	{
+		auto stringed = BinaryNinja::CoreEnumToString<T>(obj);
+		if (stringed.has_value())
+		{
+			switch (presentation)
+			{
+			default:
+			case 's':
+				return fmt::format_to(ctx.out(), "{}", *stringed);
+			case 'S':
+				return fmt::format_to(ctx.out(), "{}::{}", BinaryNinja::CoreEnumName<T>(), *stringed);
+			case 'd':
+				return fmt::format_to(ctx.out(), "{}", (size_t)obj);
+			case 'x':
+				return fmt::format_to(ctx.out(), "{:#x}", (size_t)obj);
+			}
+		}
+		else
+		{
+			return fmt::format_to(ctx.out(), "{}", (size_t)obj);
+		}
+	}
+
+	constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator
+	{
+		auto it = ctx.begin(), end = ctx.end();
+		if (it != end && (*it == 's' || *it == 'S' || *it == 'd' || *it == 'x')) presentation = *it++;
+		if (it != end && *it != '}') detail::throw_format_error("invalid format");
+		return it;
+	}
+};

@@ -538,6 +538,31 @@ BNPossibleValueSet PossibleValueSet::ToAPIObject()
 }
 
 
+void PossibleValueSet::FreeAPIObject(BNPossibleValueSet* value)
+{
+	switch (value->state)
+	{
+	case SignedRangeValue:
+	case UnsignedRangeValue:
+		delete[] value->ranges;
+		break;
+	case LookupTableValue:
+		for (size_t i = 0; i < value->count; i ++)
+		{
+			delete[] value->table[i].fromValues;
+		}
+		delete[] value->table;
+		break;
+	case InSetOfValues:
+	case NotInSetOfValues:
+		delete[] value->valueSet;
+		break;
+	default:
+		break;
+	}
+}
+
+
 DataBuffer Function::GetConstantData(BNRegisterValueType state, uint64_t value, size_t size)
 {
 	return DataBuffer(BNGetConstantData(m_object, state, value, size));
@@ -2497,26 +2522,29 @@ Ref<FlowGraph> Function::GetUnresolvedStackAdjustmentGraph()
 
 void Function::SetUserVariableValue(const Variable& var, uint64_t defAddr, PossibleValueSet& value)
 {
-	Ref<MediumLevelILFunction> mlil = GetMediumLevelIL();
-	const set<size_t>& varDefs = mlil->GetVariableDefinitions(var);
-	if (varDefs.size() == 0)
+	if (var.index != 0)
 	{
-		LogError("Could not get definition for Variable");
-		return;
-	}
-	bool found = false;
-	for (auto& site : varDefs)
-	{
-		const MediumLevelILInstruction& instr = mlil->GetInstruction(site);
-		if (instr.address == defAddr)
+		Ref<MediumLevelILFunction> mlil = GetMediumLevelIL();
+		const set<size_t>& varDefs = mlil->GetVariableDefinitions(var);
+		if (varDefs.size() == 0)
 		{
-			found = true;
-			break;
+			LogError("Could not get definition for Variable");
+			return;
 		}
-	}
-	if (!found)
-	{
-		LogError("Could not find definition for variable at given address");
+		bool found = false;
+		for (auto& site : varDefs)
+		{
+			const MediumLevelILInstruction& instr = mlil->GetInstruction(site);
+			if (instr.address == defAddr)
+			{
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+		{
+			LogError("Could not find definition for variable at given address");
+		}
 	}
 	auto defSite = BNArchitectureAndAddress();
 	defSite.arch = GetArchitecture()->m_object;
@@ -2530,31 +2558,36 @@ void Function::SetUserVariableValue(const Variable& var, uint64_t defAddr, Possi
 	auto valueObj = value.ToAPIObject();
 
 	BNSetUserVariableValue(m_object, &var_data, &defSite, &valueObj);
+
+	PossibleValueSet::FreeAPIObject(&valueObj);
 }
 
 
 void Function::ClearUserVariableValue(const Variable& var, uint64_t defAddr)
 {
-	Ref<MediumLevelILFunction> mlil = GetMediumLevelIL();
-	const set<size_t>& varDefs = mlil->GetVariableDefinitions(var);
-	if (varDefs.size() == 0)
+	if (var.index != 0)
 	{
-		LogError("Could not get definition for Variable");
-		return;
-	}
-	bool found = false;
-	for (auto& site : varDefs)
-	{
-		const MediumLevelILInstruction& instr = mlil->GetInstruction(site);
-		if (instr.address == defAddr)
+		Ref<MediumLevelILFunction> mlil = GetMediumLevelIL();
+		const set<size_t>& varDefs = mlil->GetVariableDefinitions(var);
+		if (varDefs.size() == 0)
 		{
-			found = true;
-			break;
+			LogError("Could not get definition for Variable");
+			return;
 		}
-	}
-	if (!found)
-	{
-		LogError("Could not find definition for variable at given address");
+		bool found = false;
+		for (auto& site : varDefs)
+		{
+			const MediumLevelILInstruction& instr = mlil->GetInstruction(site);
+			if (instr.address == defAddr)
+			{
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+		{
+			LogError("Could not find definition for variable at given address");
+		}
 	}
 	auto defSite = BNArchitectureAndAddress();
 	defSite.arch = GetArchitecture()->m_object;

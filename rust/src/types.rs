@@ -1227,10 +1227,11 @@ impl fmt::Debug for Type {
         if let Ok(lock) = TYPE_DEBUG_BV.lock() {
             if let Some(bv) = &*lock {
                 let mut count: usize = 0;
+                let container = unsafe { BNGetAnalysisTypeContainer(bv.handle) };
                 let lines: *mut BNTypeDefinitionLine = unsafe {
                     BNGetTypeLines(
                         self.handle,
-                        bv.handle,
+                        container,
                         "".as_ptr() as *const c_char,
                         80,
                         false,
@@ -1238,6 +1239,9 @@ impl fmt::Debug for Type {
                         &mut count as *mut usize,
                     )
                 };
+                unsafe {
+                    BNFreeTypeContainer(container);
+                }
 
                 if lines.is_null() {
                     return Err(fmt::Error);
@@ -1384,6 +1388,21 @@ impl Variable {
             index: self.index,
             storage: self.storage,
         }
+    }
+}
+
+//////////////
+// SSAVariable
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+pub struct SSAVariable {
+    pub variable: Variable,
+    pub version: usize,
+}
+
+impl SSAVariable {
+    pub fn new(variable: Variable, version: usize) -> Self {
+        Self { variable, version }
     }
 }
 
@@ -2364,7 +2383,7 @@ impl CoreArrayProvider for QualifiedNameAndType {
 }
 unsafe impl CoreOwnedArrayProvider for QualifiedNameAndType {
     unsafe fn free(raw: *mut Self::Raw, count: usize, _context: &Self::Context) {
-        BNFreeTypeList(raw, count);
+        BNFreeTypeAndNameList(raw, count);
     }
 }
 

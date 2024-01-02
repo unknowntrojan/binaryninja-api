@@ -14,8 +14,10 @@
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QPushButton>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QStyledItemDelegate>
+#include <QtWidgets/QTableWidget>
 #include <QtWidgets/QTreeView>
 
 #include <map>
@@ -160,7 +162,9 @@ class BINARYNINJAUIAPI SettingsEditor : public QWidget
 	QSpinBox* m_spinBox = nullptr;
 	QComboBox* m_comboBox = nullptr;
 	QLineEdit* m_arrayText = nullptr;
+	QTableWidget* m_objectTable = nullptr;
 	std::set<QString> m_validComboSelections;
+	std::vector<std::pair<std::string, Json::ValueType>> m_objectTableColumns;
 	Json::StreamWriterBuilder m_builder;
 
 	bool m_optional = false;
@@ -171,9 +175,11 @@ class BINARYNINJAUIAPI SettingsEditor : public QWidget
 	int m_minHeight;
 	int m_maxAdjustedWidth;
 
+	std::pair<bool, std::vector<std::pair<std::string, Json::ValueType>>> isObjectSetting(const Json::Value& value);
+	QTableWidgetItem* getTableItemForValue(const Json::Value& value);
+
   public:
-	SettingsEditor(
-	    QWidget* parent, SettingsRef settings, BinaryViewRef view, BNSettingsScope scope, const Json::Value* setting);
+	SettingsEditor(QWidget* parent, SettingsRef settings, BinaryViewRef view, BNSettingsScope scope, const Json::Value* setting);
 	~SettingsEditor();
 
 	void setSetting(const Json::Value* value, bool updateSchema = false);
@@ -198,6 +204,7 @@ class BINARYNINJAUIAPI SettingsEditor : public QWidget
 	void updateDoubleNumberSetting(double value);
 	void updateIntNumberSetting(int value);
 	void updateArraySetting();
+	void updateObjectSetting();
 	void addArrayStringSetting(const QString& text);
 	void resetSetting();
 	void resetAllSettings(BNSettingsScope scope);

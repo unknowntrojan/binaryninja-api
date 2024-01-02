@@ -33,6 +33,7 @@ struct LinearViewCursorPosition;
 struct BINARYNINJAUIAPI HighlightTokenState
 {
 	bool valid;
+	bool focused;
 	bool secondaryHighlight;
 	BNInstructionTextTokenType type;
 	BinaryNinja::InstructionTextToken token;
@@ -369,6 +370,27 @@ class BINARYNINJAUIAPI Menu
 	static Menu* dockMenu();
 	static void setMainMenuOrder(const QString& name, uint8_t order);
 	static std::vector<QString> getMainMenus();
+};
+
+class BINARYNINJAUIAPI OrderedMenuHelper
+{
+	Menu* m_menu = nullptr;
+	uint8_t m_groupOrder = MENU_ORDER_NORMAL;
+	std::map<QString, uint8_t> m_orders;
+
+public:
+	OrderedMenuHelper(Menu* menu) : m_menu(menu) { }
+
+	Menu* getMenu() { return m_menu; }
+
+	void addAction(const QString& action, const QString& group) {
+		if (m_orders.find(group) == m_orders.end())
+		{
+			m_menu->setGroupOrdering(group, m_groupOrder++);
+			m_orders[group] = MENU_ORDER_NORMAL;
+		}
+		m_menu->addAction(action, group, m_orders[group]++);
+	}
 };
 
 /*!

@@ -45,6 +45,8 @@ from .enums import (
     TypeClass, BinaryViewEventType, FunctionGraphType, TagReferenceType, TagTypeType, RegisterValueType, LogLevel,
 	DisassemblyOption
 )
+from .exceptions import RelocationWriteException, ILException
+
 from . import associateddatastore  # required for _BinaryViewAssociatedDataStore
 from .log import log_warn, log_error, Logger
 from . import typelibrary
@@ -60,6 +62,7 @@ from . import variable
 from . import architecture
 from . import filemetadata
 from . import lowlevelil
+from . import mainthread
 from . import mediumlevelil
 from . import highlevelil
 from . import debuginfo
@@ -71,6 +74,7 @@ from . import function as _function
 from . import types as _types
 from . import platform as _platform
 from . import deprecation
+from . import typecontainer
 
 PathType = Union[str, os.PathLike]
 InstructionsType = Generator[Tuple[List['_function.InstructionTextToken'], int], None, None]
@@ -79,11 +83,6 @@ ProgressFuncType = Callable[[int, int], bool]
 DataMatchCallbackType = Callable[[int, 'databuffer.DataBuffer'], bool]
 LineMatchCallbackType = Callable[[int, 'lineardisassembly.LinearDisassemblyLine'], bool]
 StringOrType = Union[str, '_types.Type', '_types.TypeBuilder']
-
-
-class RelocationWriteException(Exception):
-	""" Exception raised when a relocation fails to apply """
-	pass
 
 
 @dataclass(frozen=True)
@@ -1745,7 +1744,7 @@ class TypeMapping(collections.abc.Mapping):  # type: ignore
 
 	def __del__(self):
 		if core is not None and self._type_list is not None:
-			core.BNFreeTypeList(self._type_list, len(self))
+			core.BNFreeTypeAndNameList(self._type_list, len(self))
 
 	def __getitem__(self, key):
 		if self._type_cache is None:
@@ -1896,7 +1895,7 @@ class AdvancedILFunctionList:
 		>>> timeit.timeit(lambda:[f for f in bv.functions], number=1)
 		0.02230275600004461
 	"""
-	def __init__(self, view: 'BinaryView', preload_limit: int = 5, functions: Optional[Iterable] = None):
+	def __init__(self, view: 'BinaryView', preload_limit: int = mainthread.get_worker_thread_count(), functions: Optional[Iterable] = None):
 		self._view = view
 		self._func_queue = deque()
 		self._preload_limit = preload_limit
@@ -2597,9 +2596,10 @@ class BinaryView:
 		for func in AdvancedILFunctionList(
 		    self, self.preload_limit if preload_limit is None else preload_limit, function_generator
 		):
-			mlil = func.mlil
-			if mlil:
-				yield mlil
+			try:
+				yield func.mlil
+			except ILException:
+				pass
 
 	def hlil_functions(
 	    self, preload_limit: Optional[int] = None,
@@ -2612,9 +2612,10 @@ class BinaryView:
 		for func in AdvancedILFunctionList(
 		    self, self.preload_limit if preload_limit is None else preload_limit, function_generator
 		):
-			hlil = func.hlil
-			if hlil:
-				yield hlil
+			try:
+				yield func.hlil
+			except ILException:
+				pass
 
 	@property
 	def has_functions(self) -> bool:
@@ -4575,7 +4576,7 @@ class BinaryView:
 				size = refs[i].size
 				typeObj = None
 				if refs[i].incomingType.type:
-					typeObj = _types.Type(
+					typeObj = _types.Type.create(
 					    core.BNNewTypeReference(refs[i].incomingType.type), confidence=refs[i].incomingType.confidence
 					)
 				yield _types.TypeFieldReference(func, arch, addr, size, typeObj)
@@ -4978,6 +4979,80 @@ class BinaryView:
 		finally:
 			core.BNFreeTypeFieldReferenceTypes(refs, count.value)
 
+	def get_outgoing_direct_type_references(self, name: '_types.QualifiedNameType') -> List['_types.QualifiedName']:
+		qname = _types.QualifiedName(name)
+		_qname = qname._to_core_struct()
+		count = ctypes.c_ulonglong(0)
+		_result = core.BNGetOutgoingDirectTypeReferences(self.handle, _qname, count)
+		assert _result is not None, "core.BNGetOutgoingDirectTypeReferences returned None"
+		try:
+			result = []
+			for i in range(0, count.value):
+				result_name = _types.QualifiedName._from_core_struct(_result[i])
+				result.append(result_name)
+			return result
+		finally:
+			core.BNFreeTypeNameList(_result, count.value)
+
+	def get_outgoing_recursive_type_references(self, names: Union['_types.QualifiedNameType', List['_types.QualifiedNameType']]) -> List['_types.QualifiedName']:
+		qnames = []
+		if isinstance(names, list):
+			for name in names:
+				qnames.append(_types.QualifiedName(name))
+		else:
+			qnames.append(_types.QualifiedName(names))
+		_qnames = (core.BNQualifiedName * len(qnames))()
+		for i, qname in enumerate(qnames):
+			_qnames[i] = qname._to_core_struct()
+		count = ctypes.c_ulonglong(0)
+		_result = core.BNGetOutgoingRecursiveTypeReferences(self.handle, _qnames, len(qnames), count)
+		assert _result is not None, "core.BNGetOutgoingRecursiveTypeReferences returned None"
+		try:
+			result = []
+			for i in range(0, count.value):
+				result_name = _types.QualifiedName._from_core_struct(_result[i])
+				result.append(result_name)
+			return result
+		finally:
+			core.BNFreeTypeNameList(_result, count.value)
+
+	def get_incoming_direct_type_references(self, name: '_types.QualifiedNameType') -> List['_types.QualifiedName']:
+		qname = _types.QualifiedName(name)
+		_qname = qname._to_core_struct()
+		count = ctypes.c_ulonglong(0)
+		_result = core.BNGetIncomingDirectTypeReferences(self.handle, _qname, count)
+		assert _result is not None, "core.BNGetIncomingDirectTypeReferences returned None"
+		try:
+			result = []
+			for i in range(0, count.value):
+				result_name = _types.QualifiedName._from_core_struct(_result[i])
+				result.append(result_name)
+			return result
+		finally:
+			core.BNFreeTypeNameList(_result, count.value)
+
+	def get_incoming_recursive_type_references(self, names: Union['_types.QualifiedNameType', List['_types.QualifiedNameType']]) -> List['_types.QualifiedName']:
+		qnames = []
+		if isinstance(names, list):
+			for name in names:
+				qnames.append(_types.QualifiedName(name))
+		else:
+			qnames.append(_types.QualifiedName(names))
+		_qnames = (core.BNQualifiedName * len(qnames))()
+		for i, qname in enumerate(qnames):
+			_qnames[i] = qname._to_core_struct()
+		count = ctypes.c_ulonglong(0)
+		_result = core.BNGetIncomingRecursiveTypeReferences(self.handle, _qnames, len(qnames), count)
+		assert _result is not None, "core.BNGetIncomingRecursiveTypeReferences returned None"
+		try:
+			result = []
+			for i in range(0, count.value):
+				result_name = _types.QualifiedName._from_core_struct(_result[i])
+				result.append(result_name)
+			return result
+		finally:
+			core.BNFreeTypeNameList(_result, count.value)
+
 	def create_structure_from_offset_access(self, name: '_types.QualifiedName') -> '_types.StructureType':
 		newMemberAdded = ctypes.c_bool(False)
 		_name = _types.QualifiedName(name)._to_core_struct()
@@ -5216,7 +5291,7 @@ class BinaryView:
 		"""
 		if ordered_filter is None:
 			ordered_filter = [
-			    SymbolType.FunctionSymbol, SymbolType.ImportedFunctionSymbol, SymbolType.LibraryFunctionSymbol,
+			    SymbolType.FunctionSymbol, SymbolType.ImportedFunctionSymbol, SymbolType.LibraryFunctionSymbol, SymbolType.SymbolicFunctionSymbol,
 			    SymbolType.DataSymbol, SymbolType.ImportedDataSymbol, SymbolType.ImportAddressSymbol,
 			    SymbolType.ExternalSymbol
 			]
@@ -5504,7 +5579,6 @@ class BinaryView:
 			if tag_type is not None:
 				return TagType(tag_type)
 			else:
-				log_error(f"Tag type `{name}` does not exist!")
 				return None
 
 	def add_tag(self, addr: int, tag_type_name: str, data: str, user: bool = True):
@@ -6959,6 +7033,35 @@ class BinaryView:
 			raise ValueError(error_str)
 		return variable.PossibleValueSet(self.arch, result)
 
+	@property
+	def type_container(self) -> 'typecontainer.TypeContainer':
+		"""
+		Type Container for all types (user and auto) in the BinaryView. Any auto types
+		modified through the Type Container will be converted into user types.
+		:return: Full view Type Container
+		"""
+		container = core.BNGetAnalysisTypeContainer(self.handle)
+		return typecontainer.TypeContainer(handle=container)
+
+	@property
+	def auto_type_container(self) -> 'typecontainer.TypeContainer':
+		"""
+		Type Container for ONLY auto types in the BinaryView. Any changes to types will
+		NOT promote auto types to user types.
+		:return: Auto types only Type Container
+		"""
+		container = core.BNGetAnalysisAutoTypeContainer(self.handle)
+		return typecontainer.TypeContainer(handle=container)
+
+	@property
+	def user_type_container(self) -> 'typecontainer.TypeContainer':
+		"""
+		Type Container for ONLY user types in the BinaryView.
+		:return: User types only Type Container
+		"""
+		container = core.BNGetAnalysisUserTypeContainer(self.handle)
+		return typecontainer.TypeContainer(handle=container)
+
 	def get_type_by_name(self, name: '_types.QualifiedNameType') -> Optional['_types.Type']:
 		"""
 		``get_type_by_name`` returns the defined type whose name corresponds with the provided ``name``
@@ -7941,6 +8044,14 @@ class BinaryView:
 		:param bool force: enable rebasing while the UI is active
 		:return: the new :py:class:`BinaryView` object or ``None`` on failure
 		:rtype: :py:class:`BinaryView` or ``None``
+		:Example:
+			>>> from binaryninja import load
+			>>> bv = load('/bin/ls')
+			>>> print(bv)
+			<BinaryView: '/bin/ls', start 0x100000000, len 0x182f8>
+			>>> newbv = bv.rebase(0x400000)
+			>>> print(newbv)
+			<BinaryView: '/bin/ls', start 0x400000, len 0x182f8>
 		"""
 		result = False
 		if core.BNIsUIEnabled() and not force:

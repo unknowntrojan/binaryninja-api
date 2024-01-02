@@ -217,6 +217,8 @@ size_t NameList::size() const
 
 size_t NameList::StringSize() const
 {
+	if (m_name.size() == 0)
+		return 0;
 	size_t size = 0;
 	for (auto& name : m_name)
 		size += name.size() + m_join.size();
@@ -465,6 +467,7 @@ TypeDefinitionLine TypeDefinitionLine::FromAPIObject(BNTypeDefinitionLine* line)
 	result.lineType = line->lineType;
 	result.tokens = InstructionTextToken::ConvertInstructionTextTokenList(line->tokens, line->count);
 	result.type = new Type(BNNewTypeReference(line->type));
+	result.parentType = new Type(BNNewTypeReference(line->parentType));
 	result.rootType = new Type(BNNewTypeReference(line->rootType));
 	result.rootTypeName = line->rootTypeName;
 	result.baseType = line->baseType ? new NamedTypeReference(BNNewNamedTypeReference(line->baseType)) : nullptr;
@@ -485,6 +488,7 @@ BNTypeDefinitionLine* TypeDefinitionLine::CreateTypeDefinitionLineList(
 		result[i].tokens = InstructionTextToken::CreateInstructionTextTokenList(lines[i].tokens);
 		result[i].count = lines[i].tokens.size();
 		result[i].type = BNNewTypeReference(lines[i].type->GetObject());
+		result[i].parentType = BNNewTypeReference(lines[i].parentType->GetObject());
 		result[i].rootType = BNNewTypeReference(lines[i].rootType->GetObject());
 		result[i].rootTypeName = BNAllocString(lines[i].rootTypeName.c_str());
 		result[i].baseType = lines[i].baseType ? BNNewNamedTypeReference(lines[i].baseType->GetObject()) : nullptr;
@@ -502,6 +506,7 @@ void TypeDefinitionLine::FreeTypeDefinitionLineList(BNTypeDefinitionLine* lines,
 	{
 		InstructionTextToken::FreeInstructionTextTokenList(lines[i].tokens, lines[i].count);
 		BNFreeType(lines[i].type);
+		BNFreeType(lines[i].parentType);
 		BNFreeType(lines[i].rootType);
 		BNFreeNamedTypeReference(lines[i].baseType);
 		BNFreeString(lines[i].rootTypeName);
@@ -1197,12 +1202,12 @@ bool Type::AddTypeMemberTokens(BinaryView* data, vector<InstructionTextToken>& t
 }
 
 
-std::vector<TypeDefinitionLine> Type::GetLines(Ref<BinaryView> data, const std::string& name,
+std::vector<TypeDefinitionLine> Type::GetLines(const TypeContainer& types, const std::string& name,
 	int lineWidth, bool collapsed, BNTokenEscapingType escaping)
 {
 	size_t count;
 	BNTypeDefinitionLine* list =
-		BNGetTypeLines(m_object, data->m_object, name.c_str(), lineWidth, collapsed, escaping, &count);
+		BNGetTypeLines(m_object, types.GetObject(), name.c_str(), lineWidth, collapsed, escaping, &count);
 
 	std::vector<TypeDefinitionLine> results;
 	for (size_t i = 0; i < count; i++)
@@ -1211,6 +1216,7 @@ std::vector<TypeDefinitionLine> Type::GetLines(Ref<BinaryView> data, const std::
 		line.lineType = list[i].lineType;
 		line.tokens = InstructionTextToken::ConvertInstructionTextTokenList(list[i].tokens, list[i].count);
 		line.type = new Type(BNNewTypeReference(list[i].type));
+		line.parentType = list[i].parentType ? new Type(BNNewTypeReference(list[i].parentType)) : nullptr;
 		line.rootType = list[i].rootType ? new Type(BNNewTypeReference(list[i].rootType)) : nullptr;
 		line.rootTypeName = list[i].rootTypeName;
 		line.baseType = list[i].baseType ? new NamedTypeReference(BNNewNamedTypeReference(list[i].baseType)) : nullptr;
@@ -1227,8 +1233,6 @@ std::vector<TypeDefinitionLine> Type::GetLines(Ref<BinaryView> data, const std::
 
 string Type::GetSizeSuffix(size_t size)
 {
-	char sizeStr[32];
-
 	switch (size)
 	{
 	case 0:
@@ -1246,8 +1250,7 @@ string Type::GetSizeSuffix(size_t size)
 	case 16:
 		return ".o";
 	default:
-		snprintf(sizeStr, sizeof(sizeStr), ".%" PRIuPTR, size);
-		return sizeStr;
+		return fmt::format(".{}", size);
 	}
 }
 
@@ -1906,6 +1909,7 @@ TypeBuilder& TypeBuilder::SetParameters(const std::vector<FunctionParameter>& pa
 	size_t paramCount = 0;
 	BNFunctionParameter* paramArray = GetParamArray(params, paramCount);
 	BNSetFunctionTypeBuilderParameters(m_object, paramArray, paramCount);
+	delete[] paramArray;
 	return *this;
 }
 
@@ -2132,9 +2136,11 @@ vector<StructureMember> Structure::GetMembers() const
 	for (size_t i = 0; i < count; i++)
 	{
 		StructureMember member;
-		member.type = new Type(BNNewTypeReference(members[i].type));
+		member.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(members[i].type)), members[i].typeConfidence);
 		member.name = members[i].name;
 		member.offset = members[i].offset;
+		member.access = members[i].access;
+		member.scope = members[i].scope;
 		result.push_back(member);
 	}
 
@@ -2143,10 +2149,10 @@ vector<StructureMember> Structure::GetMembers() const
 }
 
 
-vector<InheritedStructureMember> Structure::GetMembersIncludingInherited(BinaryView* view) const
+vector<InheritedStructureMember> Structure::GetMembersIncludingInherited(const TypeContainer& types) const
 {
 	size_t count;
-	BNInheritedStructureMember* members = BNGetStructureMembersIncludingInherited(m_object, view->GetObject(), &count);
+	BNInheritedStructureMember* members = BNGetStructureMembersIncludingInherited(m_object, types.GetObject(), &count);
 
 	vector<InheritedStructureMember> result;
 	result.reserve(count);
@@ -2155,9 +2161,11 @@ vector<InheritedStructureMember> Structure::GetMembersIncludingInherited(BinaryV
 		InheritedStructureMember member;
 		member.base = members[i].base ? new NamedTypeReference(BNNewNamedTypeReference(members[i].base)) : nullptr;
 		member.baseOffset = members[i].baseOffset;
-		member.member.type = new Type(BNNewTypeReference(members[i].member.type));
+		member.member.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(members[i].member.type)), members[i].member.typeConfidence);
 		member.member.name = members[i].member.name;
 		member.member.offset = members[i].member.offset;
+		member.member.access = members[i].member.access;
+		member.member.scope = members[i].member.scope;
 		member.memberIndex = members[i].memberIndex;
 		result.push_back(member);
 	}
@@ -2176,9 +2184,11 @@ bool Structure::GetMemberIncludingInheritedAtOffset(BinaryView* view, int64_t of
 
 	result.base = member->base ? new NamedTypeReference(BNNewNamedTypeReference(member->base)) : nullptr;
 	result.baseOffset = member->baseOffset;
-	result.member.type = new Type(BNNewTypeReference(member->member.type));
+	result.member.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(member->member.type)), member->member.typeConfidence);
 	result.member.name = member->member.name;
 	result.member.offset = member->member.offset;
+	result.member.access = member->member.access;
+	result.member.scope = member->member.scope;
 	result.memberIndex = member->memberIndex;
 
 	BNFreeInheritedStructureMember(member);
@@ -2191,9 +2201,11 @@ bool Structure::GetMemberByName(const string& name, StructureMember& result) con
 	BNStructureMember* member = BNGetStructureMemberByName(m_object, name.c_str());
 	if (member)
 	{
-		result.type = new Type(BNNewTypeReference(member->type));
+		result.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(member->type)), member->typeConfidence);
 		result.name = member->name;
 		result.offset = member->offset;
+		result.access = member->access;
+		result.scope = member->scope;
 		BNFreeStructureMember(member);
 		return true;
 	}
@@ -2213,9 +2225,11 @@ bool Structure::GetMemberAtOffset(int64_t offset, StructureMember& result, size_
 	BNStructureMember* member = BNGetStructureMemberAtOffset(m_object, offset, &idx);
 	if (member)
 	{
-		result.type = new Type(BNNewTypeReference(member->type));
+		result.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(member->type)), member->typeConfidence);
 		result.name = member->name;
 		result.offset = member->offset;
+		result.access = member->access;
+		result.scope = member->scope;
 		BNFreeStructureMember(member);
 		return true;
 	}
@@ -2421,9 +2435,11 @@ vector<StructureMember> StructureBuilder::GetMembers() const
 	for (size_t i = 0; i < count; i++)
 	{
 		StructureMember member;
-		member.type = new Type(BNNewTypeReference(members[i].type));
+		member.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(members[i].type)), members[i].typeConfidence);
 		member.name = members[i].name;
 		member.offset = members[i].offset;
+		member.access = members[i].access;
+		member.scope = members[i].scope;
 		result.push_back(member);
 	}
 
@@ -2437,9 +2453,11 @@ bool StructureBuilder::GetMemberByName(const string& name, StructureMember& resu
 	BNStructureMember* member = BNGetStructureBuilderMemberByName(m_object, name.c_str());
 	if (member)
 	{
-		result.type = new Type(BNNewTypeReference(member->type));
+		result.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(member->type)), member->typeConfidence);
 		result.name = member->name;
 		result.offset = member->offset;
+		result.access = member->access;
+		result.scope = member->scope;
 		BNFreeStructureMember(member);
 		return true;
 	}
@@ -2459,9 +2477,11 @@ bool StructureBuilder::GetMemberAtOffset(int64_t offset, StructureMember& result
 	BNStructureMember* member = BNGetStructureBuilderMemberAtOffset(m_object, offset, &idx);
 	if (member)
 	{
-		result.type = new Type(BNNewTypeReference(member->type));
+		result.type = Confidence<Ref<Type>>(new Type(BNNewTypeReference(member->type)), member->typeConfidence);
 		result.name = member->name;
 		result.offset = member->offset;
+		result.access = member->access;
+		result.scope = member->scope;
 		BNFreeStructureMember(member);
 		return true;
 	}

@@ -28,6 +28,7 @@ from . import types
 from . import metadata
 from . import platform
 from . import architecture
+from . import typecontainer
 
 
 class TypeLibrary:
@@ -227,7 +228,7 @@ class TypeLibrary:
 		"""
 		return core.BNFinalizeTypeLibrary(self.handle)
 
-	def query_metadata(self, key: str) -> Optional[metadata.Metadata]:
+	def query_metadata(self, key: str) -> Optional['metadata.MetadataValueType']:
 		"""
 		`query_metadata` retrieves a metadata associated with the given key stored in the type library
 
@@ -280,6 +281,15 @@ class TypeLibrary:
 			>>> lib.remove_metadata("integer")
 		"""
 		core.BNTypeLibraryRemoveMetadata(self.handle, key)
+
+	@property
+	def type_container(self) -> 'typecontainer.TypeContainer':
+		"""
+		Type Container for all TYPES within the Type Library. Objects are not included.
+		The Type Container's Platform will be the first platform associated with the Type Library.
+		:return: Type Library Type Container
+		"""
+		return typecontainer.TypeContainer(core.BNGetTypeLibraryTypeContainer(self.handle))
 
 	def add_named_object(self, name: 'types.QualifiedName', type: 'types.Type') -> None:
 		"""

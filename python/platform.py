@@ -30,6 +30,7 @@ from . import typeparser
 from . import callingconvention
 from . import typelibrary
 from . import architecture
+from . import typecontainer
 
 
 class _PlatformMetaClass(type):
@@ -262,7 +263,7 @@ class Platform(metaclass=_PlatformMetaClass):
 		for i in range(0, count.value):
 			name = types.QualifiedName._from_core_struct(type_list[i].name)
 			result[name] = types.Type.create(core.BNNewTypeReference(type_list[i].type), platform=self)
-		core.BNFreeTypeList(type_list, count.value)
+		core.BNFreeTypeAndNameList(type_list, count.value)
 		return result
 
 	@property
@@ -275,7 +276,7 @@ class Platform(metaclass=_PlatformMetaClass):
 		for i in range(0, count.value):
 			name = types.QualifiedName._from_core_struct(type_list[i].name)
 			result[name] = types.Type.create(core.BNNewTypeReference(type_list[i].type), platform=self)
-		core.BNFreeTypeList(type_list, count.value)
+		core.BNFreeTypeAndNameList(type_list, count.value)
 		return result
 
 	@property
@@ -288,7 +289,7 @@ class Platform(metaclass=_PlatformMetaClass):
 		for i in range(0, count.value):
 			name = types.QualifiedName._from_core_struct(type_list[i].name)
 			result[name] = types.Type.create(core.BNNewTypeReference(type_list[i].type), platform=self)
-		core.BNFreeTypeList(type_list, count.value)
+		core.BNFreeTypeAndNameList(type_list, count.value)
 		return result
 
 	@property
@@ -359,6 +360,14 @@ class Platform(metaclass=_PlatformMetaClass):
 		result = core.BNGetAssociatedPlatformByAddress(self.handle, new_addr)
 		return Platform(handle=result), new_addr.value
 
+	@property
+	def type_container(self) -> 'typecontainer.TypeContainer':
+		"""
+		Type Container for all registered types in the Platform.
+		:return: Platform types Type Container
+		"""
+		return typecontainer.TypeContainer(core.BNGetPlatformTypeContainer(self.handle))
+
 	def get_type_by_name(self, name):
 		name = types.QualifiedName(name)._to_core_struct()
 		obj = core.BNGetPlatformTypeByName(self.handle, name)
@@ -406,7 +415,7 @@ class Platform(metaclass=_PlatformMetaClass):
 		"""
 		``parse_types_from_source`` parses the source string and any needed headers searching for them in
 		the optional list of directories provided in ``include_dirs``. Note that this API does not allow
-		the source to rely on existing types that only exist in a specific view. Use :py:class:`BinaryView.parse_type_string` instead.
+		the source to rely on existing types that only exist in a specific view. Use :py:meth:`BinaryView.parse_type_string` instead.
 
 		:param str source: source string to be parsed
 		:param str filename: optional source filename
@@ -461,7 +470,7 @@ class Platform(metaclass=_PlatformMetaClass):
 		"""
 		``parse_types_from_source_file`` parses the source file ``filename`` and any needed headers searching for them in
 		the optional list of directories provided in ``include_dirs``. Note that this API does not allow
-		the source to rely on existing types that only exist in a specific view. Use :py:class:`BinaryView.parse_type_string` instead.
+		the source to rely on existing types that only exist in a specific view. Use :py:meth:`BinaryView.parse_type_string` instead.
 
 		:param str filename: filename of file to be parsed
 		:param include_dirs: optional list of string filename include directories

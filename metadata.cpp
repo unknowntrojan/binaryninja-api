@@ -55,6 +55,7 @@ Metadata::Metadata(const std::vector<Ref<Metadata>>& data)
 		dataList[i] = data[i]->m_object;
 
 	m_object = BNCreateMetadataArray(dataList, data.size());
+	delete[] dataList;
 }
 
 Metadata::Metadata(const std::map<std::string, Ref<Metadata>>& data)
@@ -299,7 +300,7 @@ vector<uint8_t> Metadata::GetRaw() const
 	return result;
 }
 
-vector<Ref<Metadata>> Metadata::GetArray()
+vector<Ref<Metadata>> Metadata::GetArray() const
 {
 	size_t size = 0;
 	BNMetadata** data = BNMetadataGetArray(m_object, &size);
@@ -311,7 +312,7 @@ vector<Ref<Metadata>> Metadata::GetArray()
 	return result;
 }
 
-map<string, Ref<Metadata>> Metadata::GetKeyValueStore()
+map<string, Ref<Metadata>> Metadata::GetKeyValueStore() const
 {
 	BNMetadataValueStore* data = BNMetadataGetValueStore(m_object);
 	map<string, Ref<Metadata>> result;

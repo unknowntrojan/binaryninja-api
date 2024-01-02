@@ -16,7 +16,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::result_unit_err)]
 #![allow(clippy::type_complexity)]
-#![doc(html_no_source)]
+#![doc(html_root_url = "https://dev-rust.binary.ninja/binaryninja/")]
 #![doc(html_favicon_url = "/favicon.ico")]
 #![doc(html_logo_url = "/logo.png")]
 #![doc(issue_tracker_base_url = "https://github.com/Vector35/binaryninja-api/issues/")]
@@ -72,20 +72,17 @@
 //! The most up-to-date version of the suggested [`build.rs` is here].
 //!
 //! ### `main.rs`
-//! All standalone binaries need to call [`headless::init()`] at start and [`headless::shutdown()`] at shutdown.
+//! Standalone binaries need to initialize Binary Ninja before they can work. You can do this through [`headless::Session`], [`headless::script_helper`], or [`headless::init()`] at start and [`headless::shutdown()`] at shutdown.
 //! ```rust
 //! fn main() {
 //!     // This loads all the core architecture, platform, etc plugins
 //!     // Standalone executables need to call this, but plugins do not
-//!     binaryninja::headless::init();
+//!     let headless_session = binaryninja::headless::Session::new();
 //!
 //!     println!("Loading binary...");
-//!     let bv = binaryninja::load("/bin/cat").expect("Couldn't open `/bin/cat`");
+//!     let bv = headless_session.load("/bin/cat").expect("Couldn't open `/bin/cat`");
 //!
 //!     // Your code here...
-//!
-//!     // Important!  Standalone executables need to call shutdown or they will hang forever
-//!     binaryninja::headless::shutdown();
 //! }
 //! ```
 //!
@@ -123,7 +120,6 @@ extern crate rayon;
 // cc possible values
 // bv reorg
 // core fileaccessor (for bv saving)
-// headless wrapper for shutdown
 // platform cc
 
 #[macro_use]
@@ -153,6 +149,7 @@ pub mod linearview;
 pub mod llil;
 pub mod logger;
 pub mod metadata;
+pub mod mlil;
 pub mod platform;
 pub mod rc;
 pub mod references;
@@ -195,6 +192,7 @@ use string::BnStrCompatible;
 const BN_FULL_CONFIDENCE: u8 = 255;
 const BN_INVALID_EXPR: usize = usize::MAX;
 
+/// The main way to open and load files into Binary Ninja. Make sure you've properly initialized the core before calling this function. See [`crate::headless::init()`]
 pub fn load<S: BnStrCompatible>(filename: S) -> Option<rc::Ref<binaryview::BinaryView>> {
     let filename = filename.into_bytes_with_nul();
     let metadata = Metadata::new_of_type(MetadataType::KeyValueDataType);
@@ -215,6 +213,8 @@ pub fn load<S: BnStrCompatible>(filename: S) -> Option<rc::Ref<binaryview::Binar
     }
 }
 
+/// The main way to open and load files (with options) into Binary Ninja. Make sure you've properly initialized the core before calling this function. See [`crate::headless::init()`]
+///
 /// ```rust
 /// let settings = [("analysis.linearSweep.autorun", false)].into();
 ///

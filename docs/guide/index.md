@@ -633,7 +633,7 @@ The interactive python prompt also has several built-in functions and variables:
 
 - `here` / `current_address`: address of the current selection. It's settable too and will navigate the UI if changed
 - `current_selection`: a tuple of the start and end addresses of the current selection. It's settable and will change the current selection
-- `current_file_offset`: the file offset that corresponds the current address. It's settable and will navigate to the corresponding file offset
+- `current_raw_offset`: the file offset that corresponds the current address. It's settable and will navigate to the corresponding file offset
 - `bv` / `current_view` / : the current [BinaryView](https://api.binary.ninja/binaryninja.binaryview-module.html#binaryninja.binaryview.BinaryView)
 - `current_function`: the current [Function](https://api.binary.ninja/binaryninja.function-module.html#binaryninja.function.Function)
 - `current_basic_block`: the current [BasicBlock](https://api.binary.ninja/binaryninja.basicblock-module.html#binaryninja.basicblock.BasicBlock)
@@ -671,6 +671,9 @@ The python interpreter can be customized to run scripts on startup using `startu
 From here, you can add any custom functions or objects you want to be available in the console. If you want to restore the original copy of `startup.py` at any time, simply delete the file and restart Binary Ninja. A fresh copy of the above will be generated.
 
 #### "Run Script..."
+
+???+ Danger "Warning"
+    When you run commands in the scripting console, the UI will automatically update analysis. This is because quite often when you make a change in the console you expect it to be immediately reflected in the UI. The same is not true when running a script where you must trigger `bv.update_analysis_and_wait()` or `current_function.reanalyze()` to experience the same behavior.
 
 The "Run Script..." option in the File Menu allows loading a python script from your filesystem and executing it
 within the console. It can also be run via the Command Palette or bound to a key.
